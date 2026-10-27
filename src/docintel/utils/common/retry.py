@@ -6,7 +6,7 @@ import random
 from collections.abc import Awaitable, Callable
 
 import httpx
-from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
 
 from docintel.shared.errors import ExtractionFailed, ProviderRejected, ProviderUnavailable
 
@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 def _is_transient(exc: Exception) -> bool:
     if isinstance(exc, ModelHTTPError):
         return exc.status_code == 429 or exc.status_code >= 500
-    return isinstance(exc, httpx.TransportError | TimeoutError | ConnectionError)
+    # Timeouts and dropped connections (ModelConnectionError) have no status code: retry them.
+    return isinstance(exc, ModelAPIError | httpx.TransportError | TimeoutError | ConnectionError)
 
 
 def _describe(exc: BaseException) -> str:
@@ -45,7 +46,7 @@ async def with_retries[T](
             raise ExtractionFailed(str(exc)) from exc
         except (
             ExceptionGroup,  # every model in the fallback chain failed
-            ModelHTTPError,
+            ModelAPIError,
             httpx.TransportError,
             TimeoutError,
             ConnectionError,
