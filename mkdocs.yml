@@ -2,6 +2,12 @@ site_name: SME Document Intelligence Service
 docs_dir: docs
 nav:
   - Home: index.md
+  - User guide:
+      - Tutorial: user-guide/tutorials/upload-your-first-document.md
+      - Handle review and rejections: user-guide/how-to/handle-a-document-that-needs-review.md
+      - Change the LLM or storage: user-guide/how-to/change-the-llm-or-storage.md
+      - API reference: user-guide/reference/api.md
+      - Settings reference: user-guide/reference/settings.md
   - Developer guide:
       - Architecture: developer-guide/architecture.md
       - Setup: developer-guide/setup.md
