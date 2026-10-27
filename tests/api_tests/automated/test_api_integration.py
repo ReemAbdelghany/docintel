@@ -209,3 +209,27 @@ async def test_transient_provider_failures_are_retried_until_it_works(
     await flaky_harness.wait_for_status(document_id, "accepted")
 
     assert flaky_harness.extractor.calls == 3
+
+
+async def test_a_document_that_is_received_but_not_analysed_yet_reports_received(
+    harness: Harness,
+) -> None:
+    case_id = await harness.new_case()
+    document_id = "4c1f8f3e-1b0a-4a55-9d3b-0c5f2b9a7e11"
+    async with harness.container.sessions() as session:  # no outbox event, so no analysis row
+        await session.execute(
+            text(
+                "INSERT INTO submitted_documents (id, case_id, content_hash, filename, storage_uri)"
+                " VALUES (:id, :case_id, 'h', 'invoice.pdf', 'local://x')"
+            ),
+            {"id": document_id, "case_id": case_id},
+        )
+        await session.commit()
+
+    status = await harness.client.get(f"/v1alpha1/documents/{document_id}")
+    result = await harness.client.get(f"/v1alpha1/documents/{document_id}/result")
+
+    assert status.status_code == 200
+    assert status.json()["status"] == "received"
+    assert result.status_code == 409
+    assert result.json()["type"] == "urn:docintel:error:result_not_ready"

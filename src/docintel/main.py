@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 
 from docintel.bootstrap import Container, build_container
 from docintel.config import Settings
@@ -19,6 +20,7 @@ from docintel.models.errors import (
     InvariantViolated,
     NotFound,
     PayloadTooLarge,
+    ResultNotReady,
 )
 from docintel.routers.router import api_router, health_router
 from docintel.worker import ALL_KINDS, start_background_tasks
@@ -29,6 +31,7 @@ STATUS: dict[type[DomainError], int] = {
     IllegalTransition: 409,
     InvariantViolated: 409,
     PayloadTooLarge: 413,
+    ResultNotReady: 409,
 }
 
 
@@ -94,6 +97,24 @@ def create_app(
             },
         )
 
+    @app.exception_handler(OSError)
+    @app.exception_handler(DBAPIError)
+    async def on_dependency_down(request: Request, exc: Exception) -> JSONResponse:
+        # A refused or dropped connection is an outage, not a bug: tell clients to retry.
+        structlog.get_logger().error("dependency_unavailable", error=type(exc).__name__)
+        return JSONResponse(
+            status_code=503,
+            media_type="application/problem+json",
+            headers={"Retry-After": "5"},
+            content={
+                "type": "urn:docintel:error:dependency_unavailable",
+                "title": "dependency unavailable",
+                "status": 503,
+                "detail": "a required service (database) is unavailable, retry shortly",
+                "correlation_id": structlog.contextvars.get_contextvars().get("correlation_id"),
+            },
+        )
+
     app.include_router(health_router)
     app.include_router(api_router)
     return app
@@ -106,3 +127,7 @@ def main() -> None:
     import uvicorn
 
     uvicorn.run("docintel.main:app", host="127.0.0.1", port=8000)
+
+
+if __name__ == "__main__":
+    main()

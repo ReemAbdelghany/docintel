@@ -5,14 +5,14 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from docintel.models.errors import NotFound
+from docintel.models.errors import NotFound, ResultNotReady
 from docintel.shared.queries import (
     DocumentResultView,
     DocumentStatusView,
     EvidenceView,
     FindingView,
 )
-from docintel.utils.providers.db.tables import AnalysisRow, ExtractionRow
+from docintel.utils.providers.db.tables import AnalysisRow, ExtractionRow, SubmittedDocumentRow
 
 
 class SqlQueries:
@@ -23,7 +23,19 @@ class SqlQueries:
         async with self._sessions() as s:
             row = await s.get(AnalysisRow, document_id)
             if row is None:
-                raise NotFound(f"document {document_id}")
+                # Accepted but not analysed yet: the outbox relay creates the analysis shortly.
+                submitted = await s.get(SubmittedDocumentRow, document_id)
+                if submitted is None:
+                    raise NotFound(f"document {document_id}")
+                return DocumentStatusView(
+                    document_id=submitted.id,
+                    case_id=submitted.case_id,
+                    filename=submitted.filename,
+                    status="received",
+                    document_type=None,
+                    classification_confidence=None,
+                    findings=(),
+                )
             return DocumentStatusView(
                 document_id=row.document_id,
                 case_id=row.case_id,
@@ -46,7 +58,9 @@ class SqlQueries:
         async with self._sessions() as s:
             row = await s.get(AnalysisRow, document_id)
             if row is None:
-                raise NotFound(f"document {document_id}")
+                if await s.get(SubmittedDocumentRow, document_id) is None:
+                    raise NotFound(f"document {document_id}")
+                raise ResultNotReady("document is received and not analysed yet")
             extraction = (
                 (
                     await s.execute(
@@ -60,7 +74,7 @@ class SqlQueries:
                 .first()
             )
             if extraction is None:
-                raise NotFound(f"no result yet for document {document_id}")
+                raise ResultNotReady(f"no result yet, document status is {row.status}")
             return DocumentResultView(
                 document_id=document_id,
                 status=row.status,

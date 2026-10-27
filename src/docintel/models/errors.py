@@ -59,5 +59,9 @@ class NotFound(DomainError):
     code = "not_found"
 
 
+class ResultNotReady(DomainError):
+    code = "result_not_ready"
+
+
 class PayloadTooLarge(DomainError):
     code = "payload_too_large"
