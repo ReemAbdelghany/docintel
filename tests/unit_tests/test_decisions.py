@@ -100,8 +100,9 @@ async def test_a_failed_extraction_goes_to_review() -> None:
     assert outcome.status is DocumentStatus.NEEDS_REVIEW
 
 
-async def test_a_quote_that_is_not_in_the_document_goes_to_review() -> None:
+async def test_a_value_that_is_not_in_the_document_goes_to_review() -> None:
     facts = invoice()
+    facts.vendor_name = "Globex Corporation"  # not in the document, and neither is its quote
     facts.evidence[0] = FieldEvidence(field="vendor_name", quote="Globex Corporation")
 
     outcome = await run(classify_as(DocumentType.INVOICE), extract_returning(facts))
@@ -110,10 +111,21 @@ async def test_a_quote_that_is_not_in_the_document_goes_to_review() -> None:
     assert outcome.findings[0].code == "UNGROUNDED_EVIDENCE"
 
 
-async def test_a_required_fact_without_evidence_goes_to_review() -> None:
+async def test_a_required_fact_without_a_quote_is_grounded_by_its_value() -> None:
     outcome = await run(classify_as(DocumentType.INVOICE), extract_returning(invoice(quotes=False)))
 
+    assert outcome.status is DocumentStatus.ACCEPTED
+    assert {e.field for e in outcome.evidence} >= {"vendor_name", "invoice_number", "total"}
+
+
+async def test_a_required_fact_missing_from_the_document_goes_to_review() -> None:
+    facts = invoice(quotes=False)
+    facts.invoice_number = "INV-999"  # the document says INV-001
+
+    outcome = await run(classify_as(DocumentType.INVOICE), extract_returning(facts))
+
     assert outcome.status is DocumentStatus.NEEDS_REVIEW
+    assert outcome.findings[0].code == "MISSING_EVIDENCE"
 
 
 async def test_a_contract_with_two_parties_and_a_date_is_accepted() -> None:

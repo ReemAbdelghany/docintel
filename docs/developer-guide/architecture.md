@@ -11,7 +11,8 @@ POST /v1alpha1/cases/{id}/documents
        parse      Docling: PDF or image -> text per page (OCR for scans and photos)
        classify   LLM: invoice | contract | other, with a confidence
        extract    LLM: typed facts + a verbatim quote for each important fact
-       verify     grounding (is the quote really in the document?), required facts, business rules
+       verify     grounding (is the value really in the document?), required facts, business rules
+                  and derivations: currency and total value are computed in code when missing
        decide     accepted | rejected | needs_review
 GET /v1alpha1/documents/{id}   -> status, decision, reason, findings, facts, evidence
 ```

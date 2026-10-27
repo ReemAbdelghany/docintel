@@ -11,6 +11,8 @@ from docintel.config import get_settings
 from docintel.routers.v1alpha1.components import crud
 from docintel.routers.v1alpha1.components.rules import (
     business_violations,
+    derive_contract_values,
+    ground_by_value,
     locate_evidence,
     missing_facts,
 )
@@ -101,11 +103,19 @@ async def analyze(
     except ProcessingError as exc:
         return Outcome(DocumentStatus.NEEDS_REVIEW, f"extraction failed: {exc}", kind, confidence)
 
+    notes = derive_contract_values(facts, pages) if isinstance(facts, ContractFacts) else []
     evidence, grounding = locate_evidence(facts.evidence, pages)
+    evidence, grounding = ground_by_value(facts, evidence, grounding, pages)
     uncertain = grounding + missing_facts(facts, evidence)
     violations = business_violations(facts)
     base = Outcome(
-        DocumentStatus.ACCEPTED, None, kind, confidence, uncertain + violations, facts, evidence
+        DocumentStatus.ACCEPTED,
+        None,
+        kind,
+        confidence,
+        uncertain + violations + notes,
+        facts,
+        evidence,
     )
     if uncertain:
         base.status, base.reason = DocumentStatus.NEEDS_REVIEW, uncertain[0].message

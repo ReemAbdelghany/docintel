@@ -8,6 +8,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.settings import ModelSettings
 
 from docintel.config import Settings, get_settings
 from docintel.routers.v1alpha1.schemas.document import Classification, ContractFacts, InvoiceFacts
@@ -16,6 +17,7 @@ from docintel.utils.common.prompts import CLASSIFY, CONTRACT, INVOICE
 
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
+DETERMINISTIC: ModelSettings = {"temperature": 0.0}  # extraction should not be creative
 NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 _classifier: Agent[None, Classification] | None = None
@@ -64,12 +66,21 @@ def initialize_llm() -> None:
         output_type=_output(Classification, settings),
         instructions=CLASSIFY,
         retries=2,
+        model_settings=DETERMINISTIC,
     )
     _extractors[DocumentType.INVOICE] = Agent(
-        model, output_type=_output(InvoiceFacts, settings), instructions=INVOICE, retries=2
+        model,
+        output_type=_output(InvoiceFacts, settings),
+        instructions=INVOICE,
+        retries=2,
+        model_settings=DETERMINISTIC,
     )
     _extractors[DocumentType.CONTRACT] = Agent(
-        model, output_type=_output(ContractFacts, settings), instructions=CONTRACT, retries=2
+        model,
+        output_type=_output(ContractFacts, settings),
+        instructions=CONTRACT,
+        retries=2,
+        model_settings=DETERMINISTIC,
     )
 
 

@@ -19,6 +19,15 @@ def _is_transient(exc: Exception) -> bool:
     return isinstance(exc, httpx.TransportError | TimeoutError | ConnectionError)
 
 
+def _describe(exc: BaseException) -> str:
+    """One line per failed model, so an error says why every model in the chain failed."""
+    if isinstance(exc, ExceptionGroup):
+        return "; ".join(_describe(e) for e in exc.exceptions)
+    if isinstance(exc, ModelHTTPError):
+        return f"{exc.model_name}: HTTP {exc.status_code}"
+    return f"{type(exc).__name__}: {exc}"
+
+
 def _is_transient_failure(exc: Exception) -> bool:
     if isinstance(exc, ExceptionGroup):
         return any(_is_transient_failure(e) for e in exc.exceptions if isinstance(e, Exception))
@@ -42,10 +51,14 @@ async def with_retries[T](
             ConnectionError,
         ) as exc:
             if not _is_transient_failure(exc):
-                raise ProviderRejected(str(exc)) from exc
+                raise ProviderRejected(_describe(exc)) from exc
             if attempt == attempts:
-                raise ProviderUnavailable(f"gave up after {attempts} attempts: {exc}") from exc
+                raise ProviderUnavailable(
+                    f"gave up after {attempts} attempts: {_describe(exc)}"
+                ) from exc
             delay = min(cap, base**attempt) * random.uniform(0.5, 1.0)  # noqa: S311 - jitter only
-            logger.warning("provider_retry attempt=%s delay=%.1fs error=%s", attempt, delay, exc)
+            logger.warning(
+                "provider_retry attempt=%s delay=%.1fs error=%s", attempt, delay, _describe(exc)
+            )
             await asyncio.sleep(delay)
     raise AssertionError("unreachable")  # pragma: no cover

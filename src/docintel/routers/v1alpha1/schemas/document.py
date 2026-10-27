@@ -2,7 +2,7 @@
 
 from datetime import date
 from decimal import Decimal
-from typing import ClassVar
+from typing import ClassVar, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -39,11 +39,30 @@ class InvoiceFacts(BaseModel):
 
 class ContractFacts(BaseModel):
     title: str | None = None
-    parties: list[str] = Field(default_factory=list)
-    effective_date: date | None = None
-    end_date: date | None = None
-    total_value: Decimal | None = None
-    currency: str | None = None
+    parties: list[str] = Field(
+        default_factory=list,
+        description="Legal names of each contracting party (people or companies); no roles",
+    )
+    effective_date: date | None = Field(
+        default=None, description="Date the agreement starts (commencement date)"
+    )
+    end_date: date | None = Field(default=None, description="Date the agreement expires")
+    recurring_amount: Decimal | None = Field(
+        default=None, description="Amount paid each period, for example the monthly rent"
+    )
+    recurring_period: Literal["monthly", "quarterly", "yearly"] | None = None
+    annual_increase_percent: Decimal | None = Field(
+        default=None, description="Yearly increase of the recurring amount, in percent"
+    )
+    security_deposit: Decimal | None = None
+    total_value: Decimal | None = Field(
+        default=None,
+        description="Only a total for the WHOLE term that the document states; never the "
+        "periodic amount",
+    )
+    currency: str | None = Field(
+        default=None, description="3-letter ISO code of the money amounts, for example EGP"
+    )
     evidence: list[FieldEvidence] = Field(default_factory=list)
 
     REQUIRED: ClassVar[tuple[str, ...]] = ("parties", "effective_date")
@@ -57,6 +76,7 @@ class Classification(BaseModel):
 class Finding(BaseModel):
     code: str
     message: str
+    field: str | None = None
 
 
 class CaseResponse(BaseModel):

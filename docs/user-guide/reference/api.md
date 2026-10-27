@@ -37,7 +37,9 @@ All endpoints are under `/v1alpha1`. Interactive docs are at `/docs`.
 
 **Invoice:** `vendor_name`, `invoice_number`, `issue_date`, `currency`, `subtotal`, `tax`, `total`, `line_items[{description, amount}]`. Required: vendor, number, date, total.
 
-**Contract:** `title`, `parties[]`, `effective_date`, `end_date`, `total_value`, `currency`. Required: at least two parties and the effective date.
+**Contract:** `title`, `parties[]`, `effective_date`, `end_date`, `recurring_amount`, `recurring_period` (`monthly`, `quarterly`, `yearly`), `annual_increase_percent`, `security_deposit`, `total_value`, `currency`. Required: at least two parties and the effective date.
+
+`total_value` is the total over the whole term. If the document does not state one, it is **derived** from the recurring amount, the dates and the yearly increase (for example 36 monthly payments of 45,000 rising 10% a year gives 1,787,400.00), and a `DERIVED_TOTAL_VALUE` finding explains how. If `currency` is empty and the document uses exactly one currency code, that code is used and a `CURRENCY_INFERRED` finding says so.
 
 A fact that is not in the document is `null`, never a guess.
 
@@ -45,13 +47,15 @@ A fact that is not in the document is `null`, never a guess.
 
 | Code | Outcome | Meaning |
 | --- | --- | --- |
-| `UNGROUNDED_EVIDENCE` | needs_review | A quote was not found in the document text |
+| `UNGROUNDED_EVIDENCE` | needs_review | A quote and its value were both not found in the document text |
 | `MISSING_FACT` | needs_review | A required fact is missing |
 | `MISSING_EVIDENCE` | needs_review | A required fact has no grounded quote |
 | `TOTAL_MISMATCH` | rejected | Subtotal plus tax does not equal the total |
 | `LINE_ITEMS_MISMATCH` | rejected | Line items do not add up to the subtotal |
 | `DATE_ORDER` | rejected | A contract ends before it starts |
 | `INVALID_CURRENCY` | rejected | The currency is not a 3-letter code |
+| `DERIVED_TOTAL_VALUE` | note only | The total value was computed from the recurring amount |
+| `CURRENCY_INFERRED` | note only | The currency was taken from the only code used in the document |
 
 If both kinds apply, `needs_review` wins: a rule computed from unreliable values proves nothing.
 
