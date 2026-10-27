@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -25,6 +26,11 @@ from docintel.models.errors import (
 from docintel.routers.router import api_router, health_router
 from docintel.worker import ALL_KINDS, start_background_tasks
 
+os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")  # read when the library first runs
+
+NOISY_LOGGERS = ("docling", "docling_core", "httpx", "httpcore", "huggingface_hub", "transformers")
+QUIET_PATHS = ("GET /healthz", "GET /readyz", "GET /v1alpha1/documents/")
+
 STATUS: dict[type[DomainError], int] = {
     NotFound: 404,
     InvalidValue: 422,
@@ -35,8 +41,26 @@ STATUS: dict[type[DomainError], int] = {
 }
 
 
+class QuietPolling(logging.Filter):
+    """Drop successful access-log lines for health checks and status polling.
+
+    uvicorn passes (client, method, path, http_version, status_code) as the record's args.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) != 5:
+            return True
+        _client, method, path, _version, status = args
+        quiet = status == 200 and f"{method} {path}".startswith(QUIET_PATHS)
+        return not quiet
+
+
 def configure_logging(level: str) -> None:
     logging.basicConfig(level=level, format="%(message)s")
+    logging.getLogger("uvicorn.access").addFilter(QuietPolling())
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)  # library chatter, not our events
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
