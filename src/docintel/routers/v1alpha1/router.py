@@ -14,7 +14,6 @@ from docintel.routers.v1alpha1.schemas.document import (
     Finding,
     UploadResponse,
 )
-from docintel.shared.document_types import DocumentStatus
 from docintel.utils.providers.storage_provider import get_storage
 
 v1alpha1_router = APIRouter(prefix=BASE_URL_PREFIX)
@@ -89,8 +88,7 @@ async def list_documents(case_id: UUID) -> list[DocumentResponse]:
 @v1alpha1_router.post("/documents/{document_id}/reprocess", status_code=202, tags=["testing"])
 async def reprocess_document(document_id: UUID, background: BackgroundTasks) -> DocumentResponse:
     """Run the pipeline again, for example after a provider outage (for testing)."""
-    document = await _document_or_404(document_id)
-    await crud.mark_processing(document.id)
-    background.add_task(process_document, document.id)
-    document.status = DocumentStatus.PROCESSING
-    return to_response(document)
+    await _document_or_404(document_id)
+    await crud.mark_processing(document_id)
+    background.add_task(process_document, document_id)
+    return to_response(await _document_or_404(document_id))

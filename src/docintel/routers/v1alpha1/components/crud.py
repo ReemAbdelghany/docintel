@@ -63,7 +63,18 @@ async def list_documents(case_id: UUID) -> list[Document]:
 
 
 async def mark_processing(document_id: UUID) -> None:
-    await save_result(document_id, status=DocumentStatus.PROCESSING, reason=None)
+    """Back to processing, and forget the previous result so it is never shown as current."""
+    await save_result(
+        document_id,
+        status=DocumentStatus.PROCESSING,
+        reason=None,
+        document_type=None,
+        classification_confidence=None,
+        findings=[],
+        facts=None,
+        evidence=[],
+        model=None,
+    )
 
 
 async def save_result(document_id: UUID, **values: object) -> None:
