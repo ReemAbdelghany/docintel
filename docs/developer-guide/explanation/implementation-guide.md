@@ -1010,7 +1010,7 @@ async def test_unknown_extension_is_unsupported(parser):
 
 **Borrowed idea, optional third adapter.** The `ocr_parsing` example in the pydantic-ai-examples repository converts each PDF page to an image and sends it to a vision model, which handles scans uniformly, with an asyncio semaphore capping concurrent requests. If you have time, add a `VisionParser` that uses page rendering from `utils/image_processing/` and the same concurrency-limited model wrapper as M5. It satisfies the same `DocumentParser` contract, costs tokens per page, and is the natural answer for scans and Arabic documents. The semaphore is the same idea as `ConcurrencyLimitedModel` below.
 
-**Check:** `uv run python scripts/try_parse.py assets/Examples/invoice.pdf --parser docling` (and `--parser unstructured`) prints each page's number and the first 200 characters of its text.
+**Check:** `uv run python scripts/try_parse.py assets/Examples/invoice_clean.pdf --parser docling` (and `--parser unstructured`) prints each page's number and the first 200 characters of its text.
 
 ## 7. M5: LLM adapters
 
@@ -1059,7 +1059,9 @@ Swapping provider is then one environment variable: `DOCINTEL_LLM_MODEL=nim:nvid
 
 - The hosted endpoint is OpenAI-compatible Chat Completions at `https://integrate.api.nvidia.com/v1`, with an API key from build.nvidia.com. Use `OpenAIChatModel`, not the Responses-API model that the `openai:` prefix selects.
 - Model ids must be exact, for example `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`; a shortened name returns 404.
-- Tool calling is enabled for the Llama 3.x family, so Pydantic AI's default **tool output** mode works: the schema is sent as a function the model must call. That is the default (`llm_output_mode='tool'`).
+- Tool calling is enabled for the Llama 3.x family, so Pydantic AI's default **tool output** mode works with them: the schema is sent as a function the model must call.
+- **Measured on a real run:** Llama 3.3 70B is retired on NIM (HTTP 410), and several catalog models are listed but not enabled for a free account (404 'not found for account'). The model that works here is `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`. In tool mode it split one answer across two parallel `final_result` calls, NIM ignored `parallel_tool_calls=false`, and Pydantic AI used only the first, leaving the facts empty. **Prompted mode extracted the invoice correctly**, so `llm_output_mode` defaults to `prompted`. Always run your own fixtures through a model before trusting it.
+- The free tier rate-limits with `503 ResourceExhausted ... request limit reached`. That is a transient failure: it maps to `ProviderUnavailable`, and the M7 retry policy (8 attempts with jittered backoff) rides it out. In practice an extraction can take several minutes under load, so clients must poll.
 - NIM also documents constrained decoding through `extra_body={'nvext': {'guided_json': schema}}`, but those docs describe self-hosted containers, and I could not confirm the hosted endpoint honors it for every model. Do not depend on it; test it before using it.
 - If a model you want has no tool calling, set `llm_output_mode='prompted'` (Pydantic AI's `PromptedOutput`: the schema goes into the prompt and the reply is parsed). It fails more often, which is what the validation retries and the review path are for.
 

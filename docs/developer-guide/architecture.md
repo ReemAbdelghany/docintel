@@ -262,8 +262,8 @@ A small exception hierarchy in the domain:
 - All routes are versioned under `/v1alpha1` (`routers/v1alpha1/`); a breaking change gets a new version directory.
 - `POST /cases` create an onboarding case.
 - `POST /cases/{id}/documents` upload; returns `202` and the document id.
-- `GET /documents/{id}` status, type, issues.
-- `GET /documents/{id}/result` extracted data with evidence.
+- `GET /documents/{id}` status, type, issues. A document that was accepted but not yet analysed reports `received`; an unknown id is a 404.
+- `GET /documents/{id}/result` extracted data with evidence; `409 result_not_ready` until an extraction exists.
 - `GET /reviews?status=open` includes both `NEEDS_REVIEW` and `FAILED` documents; `POST /reviews/{id}/resolve` records a decision or correction.
 - `POST /documents/{id}/reprocess` re-run after a schema, prompt, or model change.
 - `/healthz`, `/readyz`, `/metrics` if exposing Prometheus format.
