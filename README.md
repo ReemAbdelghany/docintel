@@ -38,4 +38,6 @@ Open the `bruno/` folder in Bruno and run the numbered requests in order (or `cd
 | Storage | `DOCINTEL_STORAGE_BACKEND` | `local` (default), `s3` |
 | LLM | `DOCINTEL_LLM_MODEL` | `nim:<model>` (default), `openai-compatible:<model>`, or any Pydantic AI model string |
 
+**See what the AI did:** [`docs/assets/trace-report.html`](docs/assets/trace-report.html) is an AgentCanvas report for one synthetic invoice (open it in a browser): the classify and extract calls, the prompts and replies, and the tokens per step. Regenerate it with `scripts/trace_report.sh` (see the setup guide).
+
 See the [architecture](docs/developer-guide/architecture.md) and the ADRs in `docs/developer-guide/adr/`. Run the quality gates with `scripts/check.sh`.
