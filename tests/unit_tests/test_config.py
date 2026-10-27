@@ -12,8 +12,10 @@ def test_settings_read_docintel_prefixed_environment(monkeypatch) -> None:
 
 
 def test_providers_default_to_local_storage_docling_and_tool_output(monkeypatch) -> None:
-    monkeypatch.setenv("DOCINTEL_LLM_MODEL", "nim:meta/llama-3.3-70b-instruct")
-    monkeypatch.setenv("DOCINTEL_CLASSIFIER_MODEL", "nim:meta/llama-3.3-70b-instruct")
+    monkeypatch.setenv("DOCINTEL_LLM_MODEL", "nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
+    monkeypatch.setenv(
+        "DOCINTEL_CLASSIFIER_MODEL", "nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+    )
 
     settings = Settings(_env_file=None)
 

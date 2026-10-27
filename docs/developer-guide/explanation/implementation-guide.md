@@ -183,14 +183,14 @@ services:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='DOCINTEL_', env_file='config/.env')
 
-    database_url: str = 'postgresql+asyncpg://docintel:docintel@localhost:5432/docintel'
+    database_url: str = 'postgresql+asyncpg://docintel:docintel@localhost:5433/docintel'
     storage_backend: Literal['local', 's3'] = 'local'
     local_storage_path: Path = Path('storage')
     s3_endpoint: str = 'http://localhost:9000'
     s3_bucket: str = 'documents'
     parser_backend: Literal['docling', 'unstructured'] = 'docling'
     unstructured_strategy: str = 'auto'
-    llm_model: str                      # 'nim:meta/llama-3.3-70b-instruct', 'anthropic:...', from the environment
+    llm_model: str                      # 'nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', 'anthropic:...', from the environment
     classifier_model: str
     llm_output_mode: Literal['tool', 'prompted'] = 'tool'
     nvidia_api_key: SecretStr = SecretStr('')           # from build.nvidia.com, for 'nim:' models
@@ -1053,12 +1053,12 @@ def build_model(names: list[str], settings: Settings) -> Model:
 model = build_model([settings.llm_model, *settings.llm_fallbacks], settings)
 ```
 
-Swapping provider is then one environment variable: `DOCINTEL_LLM_MODEL=nim:meta/llama-3.3-70b-instruct`, `anthropic:<model>`, or `openai-compatible:<model>` with `DOCINTEL_LLM_BASE_URL` pointing at a local server. A fallback chain can even cross providers (`DOCINTEL_LLM_FALLBACKS`).
+Swapping provider is then one environment variable: `DOCINTEL_LLM_MODEL=nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, `anthropic:<model>`, or `openai-compatible:<model>` with `DOCINTEL_LLM_BASE_URL` pointing at a local server. A fallback chain can even cross providers (`DOCINTEL_LLM_FALLBACKS`).
 
 **NVIDIA NIM specifics** (check each against the current NVIDIA documentation, because the hosted catalog changes):
 
 - The hosted endpoint is OpenAI-compatible Chat Completions at `https://integrate.api.nvidia.com/v1`, with an API key from build.nvidia.com. Use `OpenAIChatModel`, not the Responses-API model that the `openai:` prefix selects.
-- Model ids must be exact, for example `meta/llama-3.3-70b-instruct`; a shortened name returns 404.
+- Model ids must be exact, for example `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`; a shortened name returns 404.
 - Tool calling is enabled for the Llama 3.x family, so Pydantic AI's default **tool output** mode works: the schema is sent as a function the model must call. That is the default (`llm_output_mode='tool'`).
 - NIM also documents constrained decoding through `extra_body={'nvext': {'guided_json': schema}}`, but those docs describe self-hosted containers, and I could not confirm the hosted endpoint honors it for every model. Do not depend on it; test it before using it.
 - If a model you want has no tool calling, set `llm_output_mode='prompted'` (Pydantic AI's `PromptedOutput`: the schema goes into the prompt and the reply is parsed). It fails more often, which is what the validation retries and the review path are for.

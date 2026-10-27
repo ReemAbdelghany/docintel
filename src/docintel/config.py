@@ -10,7 +10,7 @@ class Settings(BaseSettings):
         env_prefix="DOCINTEL_", env_file="config/.env", extra="ignore"
     )
 
-    database_url: str = "postgresql+asyncpg://docintel:docintel@localhost:5432/docintel"
+    database_url: str = "postgresql+asyncpg://docintel:docintel@localhost:5433/docintel"
     storage_backend: Literal["local", "s3"] = "local"
     local_storage_path: Path = Path("storage")
     s3_endpoint: str = "http://localhost:9000"
