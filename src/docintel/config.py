@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     s3_bucket: str = "documents"
     llm_model: str = "nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
     classifier_model: str = "nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+    # Tried in order when the main model fails (comma-separated model specs, empty = none)
+    llm_fallbacks: str = "nim:meta/llama-3.2-11b-vision-instruct"
     llm_output_mode: Literal["tool", "prompted"] = "prompted"
     nvidia_api_key: SecretStr = SecretStr("")
     llm_base_url: str = ""

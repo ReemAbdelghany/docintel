@@ -5,6 +5,7 @@ import os
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, PromptedOutput, ToolOutput
 from pydantic_ai.models import Model
+from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -39,6 +40,16 @@ def resolve_model(spec: str, settings: Settings) -> Model | str:
             return spec  # 'anthropic:...', 'openai:...' and so on
 
 
+def build_model(spec: str, settings: Settings) -> Model | str:
+    """The main model, then each fallback in order when it fails (rate limit, outage, 4xx/5xx)."""
+    fallbacks = [s.strip() for s in settings.llm_fallbacks.split(",") if s.strip()]
+    chain = [spec, *[f for f in fallbacks if f != spec]]
+    if len(chain) == 1:
+        return resolve_model(spec, settings)
+    models = [resolve_model(s, settings) for s in chain]
+    return FallbackModel(*models)
+
+
 def _output[T](schema: type[T], settings: Settings) -> ToolOutput[T] | PromptedOutput[T]:
     return ToolOutput(schema) if settings.llm_output_mode == "tool" else PromptedOutput(schema)
 
@@ -46,8 +57,8 @@ def _output[T](schema: type[T], settings: Settings) -> ToolOutput[T] | PromptedO
 def initialize_llm() -> None:
     global _classifier
     settings = get_settings()
-    classifier_model = resolve_model(settings.classifier_model, settings)
-    model = resolve_model(settings.llm_model, settings)
+    classifier_model = build_model(settings.classifier_model, settings)
+    model = build_model(settings.llm_model, settings)
     _classifier = Agent(
         classifier_model,
         output_type=_output(Classification, settings),

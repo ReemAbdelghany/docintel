@@ -58,6 +58,7 @@ async def llm_classify(pages: list[ParsedPage]) -> Classification:
     prompt = f"<document>\n{_text(pages)[:CLASSIFY_CHARS]}\n</document>"
     agent = get_classifier()
     result = await with_retries(lambda: agent.run(prompt), get_settings().llm_max_attempts)
+    log.info("llm_call", stage="classify", model=result.response.model_name)
     return result.output
 
 
@@ -65,6 +66,7 @@ async def llm_extract(doc_type: DocumentType, pages: list[ParsedPage]) -> Facts:
     prompt = f"<document>\n{_text(pages)}\n</document>"
     agent = get_extractor(doc_type)
     result = await with_retries(lambda: agent.run(prompt), get_settings().llm_max_attempts)
+    log.info("llm_call", stage="extract", model=result.response.model_name)
     output = result.output
     assert isinstance(output, InvoiceFacts | ContractFacts)  # noqa: S101 - agent matches type
     return output

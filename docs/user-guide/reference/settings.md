@@ -9,6 +9,7 @@ Read from environment variables with the `DOCINTEL_` prefix, or from `config/.en
 | `LOCAL_STORAGE_PATH` | `<repo>/storage` | Where local files go |
 | `S3_ENDPOINT`, `S3_BUCKET` | `http://localhost:9000`, `documents` | S3-compatible storage |
 | `LLM_MODEL`, `CLASSIFIER_MODEL` | `nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | Extraction and classification models |
+| `LLM_FALLBACKS` | `nim:meta/llama-3.2-11b-vision-instruct` | Comma-separated models tried in order when the main model fails; empty for none |
 | `LLM_OUTPUT_MODE` | `prompted` | `prompted` or `tool` |
 | `NVIDIA_API_KEY` | empty | Key for `nim:` models |
 | `LLM_BASE_URL`, `LLM_API_KEY` | empty | For `openai-compatible:` models |

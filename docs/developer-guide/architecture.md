@@ -58,7 +58,8 @@ Providers follow one pattern: `initialize_x()` runs once in the app lifespan and
 
 ## Error handling and resilience
 
-- Provider calls retry rate limits (429), 5xx and network errors with exponential backoff and jitter (`DOCINTEL_LLM_MAX_ATTEMPTS`, default 8). Other provider errors do not retry.
+- The LLM is a chain: the main model, then `DOCINTEL_LLM_FALLBACKS` in order (Pydantic AI `FallbackModel`). The logs record which model answered.
+- Provider calls retry rate limits (429), 5xx and network errors with exponential backoff and jitter once every model in the chain has failed (`DOCINTEL_LLM_MAX_ATTEMPTS`, default 8). Other provider errors do not retry.
 - Every processing error ends in `needs_review` with a readable reason. A document is never left in `processing` by an exception.
 - A database outage returns `503` with `Retry-After`, and `/readyz` reports it.
 - Uploads are content-addressed: the same bytes in the same case return the existing document.

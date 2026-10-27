@@ -19,6 +19,12 @@ def _is_transient(exc: Exception) -> bool:
     return isinstance(exc, httpx.TransportError | TimeoutError | ConnectionError)
 
 
+def _is_transient_failure(exc: Exception) -> bool:
+    if isinstance(exc, ExceptionGroup):
+        return any(_is_transient_failure(e) for e in exc.exceptions if isinstance(e, Exception))
+    return _is_transient(exc)
+
+
 async def with_retries[T](
     call: Callable[[], Awaitable[T]], attempts: int, base: float = 2.0, cap: float = 30.0
 ) -> T:
@@ -28,8 +34,14 @@ async def with_retries[T](
             return await call()
         except UnexpectedModelBehavior as exc:
             raise ExtractionFailed(str(exc)) from exc
-        except (ModelHTTPError, httpx.TransportError, TimeoutError, ConnectionError) as exc:
-            if not _is_transient(exc):
+        except (
+            ExceptionGroup,  # every model in the fallback chain failed
+            ModelHTTPError,
+            httpx.TransportError,
+            TimeoutError,
+            ConnectionError,
+        ) as exc:
+            if not _is_transient_failure(exc):
                 raise ProviderRejected(str(exc)) from exc
             if attempt == attempts:
                 raise ProviderUnavailable(f"gave up after {attempts} attempts: {exc}") from exc

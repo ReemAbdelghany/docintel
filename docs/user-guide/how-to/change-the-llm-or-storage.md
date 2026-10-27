@@ -19,6 +19,16 @@ DOCINTEL_LLM_API_KEY=<key or any value>
 DOCINTEL_LLM_MODEL=anthropic:<model-name>
 ```
 
+## Fallback models
+
+If the main model fails (rate limit, outage, an error response), the next model in `DOCINTEL_LLM_FALLBACKS` is tried, for the classifier and the extractor alike:
+
+```bash
+DOCINTEL_LLM_FALLBACKS=nim:meta/llama-3.2-11b-vision-instruct,anthropic:<model-name>
+```
+
+The logs show which model answered each call (`llm_call`). Only list models that accept text and can return JSON. Image-only OCR models such as `nvidia/nemotron-parse` reject text input, and one that answers with invalid output would stop the chain instead of passing on to the next model. Retries with backoff start only when every model in the chain has failed.
+
 Not every listed model is enabled for every account. Test a model with a few of your own documents before relying on it. If a model supports tool calling reliably you can set `DOCINTEL_LLM_OUTPUT_MODE=tool`; the default `prompted` works with the default model.
 
 ## Storage
