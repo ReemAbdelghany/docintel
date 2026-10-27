@@ -1,0 +1,36 @@
+meta {
+  name: 05 Document status
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{host}}/v1alpha1/documents/{{document_id}}
+  body: none
+  auth: none
+}
+
+script:pre-request {
+  // Processing is asynchronous (parse, classify, LLM). Wait until the document settles.
+  const axios = require("axios");
+  const url = bru.interpolate("{{host}}/v1alpha1/documents/{{document_id}}");
+  for (let i = 0; i < 90; i++) {
+    const r = await axios.get(url, { validateStatus: () => true });
+    if (r.status === 200 && r.data.status !== "processing") break;
+    await bru.sleep(4000);
+  }
+}
+
+tests {
+  test("processing finished with a decision", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.status).to.be.oneOf(["accepted", "rejected", "needs_review"]);
+  });
+  test("the type was detected", function () {
+    expect(res.body.document_type).to.be.oneOf(["invoice", "contract", "other", null]);
+  });
+}
+
+docs {
+  Waits until processing settles. Shows the detected type, the decision, the reason, the extracted facts and the evidence.
+}

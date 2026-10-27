@@ -1,0 +1,39 @@
+meta {
+  name: 01 Upload
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{host}}/v1alpha1/cases/{{case_id}}/documents
+  body: multipartForm
+  auth: none
+}
+
+script:pre-request {
+  // Create a case first if none exists yet, so this request also works on its own.
+  if (!bru.getVar("case_id")) {
+    const axios = require("axios");
+    const r = await axios.post(bru.interpolate("{{host}}/v1alpha1/cases"));
+    bru.setVar("case_id", r.data.case_id);
+  }
+}
+
+body:multipart-form {
+  file: @file(../assets/Examples/invoice_clean.pdf)
+}
+
+script:post-response {
+  bru.setVar("invoice_pdf_id", res.body.document_id);
+}
+
+tests {
+  test("accepted for processing", function () {
+    expect(res.status).to.equal(202);
+    expect(res.body.status).to.be.oneOf(["processing", "accepted", "rejected", "needs_review"]);
+  });
+}
+
+docs {
+  A clean invoice: classified as an invoice, facts extracted, every value found in the document.
+}

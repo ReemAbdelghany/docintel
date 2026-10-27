@@ -1,0 +1,38 @@
+meta {
+  name: 04 Upload document
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{host}}/v1alpha1/cases/{{case_id}}/documents
+  body: multipartForm
+  auth: none
+}
+
+script:pre-request {
+  // Create a case first if none exists yet, so this request also works on its own.
+  if (!bru.getVar("case_id")) {
+    const axios = require("axios");
+    const r = await axios.post(bru.interpolate("{{host}}/v1alpha1/cases"));
+    bru.setVar("case_id", r.data.case_id);
+  }
+}
+
+body:multipart-form {
+  file: @file(../assets/Examples/invoice_clean.pdf)
+}
+
+script:post-response {
+  bru.setVar("document_id", res.body.document_id);
+}
+
+tests {
+  test("accepted for processing", function () {
+    expect(res.status).to.equal(202);
+  });
+}
+
+docs {
+  Upload ANY PDF or image. The service detects what it is (invoice, contract or other). To try your own file, replace the file in the body tab. The sample is only a default. Saves `document_id`.
+}

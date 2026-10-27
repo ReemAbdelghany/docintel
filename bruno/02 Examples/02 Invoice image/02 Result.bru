@@ -1,11 +1,11 @@
 meta {
-  name: 13 Non-document status
+  name: 02 Result
   type: http
-  seq: 13
+  seq: 2
 }
 
 get {
-  url: {{host}}/v1alpha1/documents/{{bad_id}}
+  url: {{host}}/v1alpha1/documents/{{invoice_image_id}}
   body: none
   auth: none
 }
@@ -13,7 +13,7 @@ get {
 script:pre-request {
   // Processing is asynchronous (parse, classify, LLM). Wait until the document settles.
   const axios = require("axios");
-  const url = bru.interpolate("{{host}}/v1alpha1/documents/{{bad_id}}");
+  const url = bru.interpolate("{{host}}/v1alpha1/documents/{{invoice_image_id}}");
   for (let i = 0; i < 90; i++) {
     const r = await axios.get(url, { validateStatus: () => true });
     if (r.status === 200 && r.data.status !== "processing") break;
@@ -22,13 +22,13 @@ script:pre-request {
 }
 
 tests {
-  test("decision is needs_review", function () {
+  test("decision is accepted", function () {
     expect(res.status).to.equal(200);
-    expect(res.body.status).to.equal("needs_review");
-    expect(res.body.reason).to.contain("parsing failed");
+    expect(res.body.status).to.equal("accepted");
+    expect(res.body.document_type).to.equal("invoice");
   });
 }
 
 docs {
-  When the system cannot process a file with confidence, it is routed to manual review.
+  Waits until processing settles, then checks the decision.
 }
