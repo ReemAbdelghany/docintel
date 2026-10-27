@@ -1,52 +1,41 @@
-# SME Document Intelligence Service
+# Document Intelligence Service
 
-An auditable document-processing service for SME onboarding. It accepts business documents, extracts typed facts with page-level evidence, validates them deterministically, and routes doubtful results to human review.
-
-The system prefers a missing fact and a review task over a confidently wrong value. The underwriting decision itself, reviewer authentication, and a full review UI are outside this project's scope.
+Upload a PDF or an image of a contract or an invoice and get structured, verified data back. Each document is parsed, classified, extracted, checked against its own text and business rules, and then **accepted**, **rejected**, or routed to **manual review** when the system cannot be confident.
 
 ## Quick start
 
-Requirements: Python 3.12+, `uv`, and Docker Compose.
+Requirements: Python 3.12+, `uv`, Docker, and a free NVIDIA API key (build.nvidia.com).
 
 ```bash
 uv sync
-cp config/.env.example config/.env
-scripts/up.sh        # Postgres, MinIO, Jaeger
-scripts/check.sh     # lint, types, architecture contracts, tests
+cp config/.env.example config/.env          # add DOCINTEL_NVIDIA_API_KEY
+docker compose -f docker/docker-compose.yml up -d postgres
+uv run alembic -c alembic/docintel/alembic.ini upgrade head
+python src/docintel/main.py                 # http://127.0.0.1:8000/docs
 ```
 
-The API entrypoint is `src/docintel/main.py`. Database migrations and the API/worker services are added in later milestones.
+## API (`/v1alpha1`)
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /cases` | Create an onboarding case |
+| `POST /cases/{id}/documents` | Upload a PDF or image; processing runs in the background (202) |
+| `GET /documents/{id}` | Status, decision, reason, extracted facts and evidence |
+| `GET /cases/{id}/documents`, `POST /documents/{id}/reprocess` | For testing |
+
+Open the `bruno/` folder in Bruno and run the numbered requests in order (or `cd bruno && npx @usebruno/cli run --env local`).
+
+## Outcomes
+
+- **accepted**: classified with confidence, required facts present and found in the document, business rules pass.
+- **rejected**: not an invoice or contract, or it breaks a rule (for example the total does not match subtotal plus tax).
+- **needs_review**: parsing or classification failed or was unsure, extraction failed, or a value cannot be traced to the document.
 
 ## Swappable by configuration
 
-| Capability | Setting | Adapters |
+| Capability | Setting | Options |
 | --- | --- | --- |
-| Storage | `DOCINTEL_STORAGE_BACKEND` | `local` (default), `s3` (MinIO or AWS) |
-| Parser | `DOCINTEL_PARSER_BACKEND` | `docling` (default), `unstructured` |
-| LLM | `DOCINTEL_LLM_MODEL` | `nim:<model>` (NVIDIA NIM, default), `openai-compatible:<model>`, or any Pydantic AI model string |
+| Storage | `DOCINTEL_STORAGE_BACKEND` | `local` (default), `s3` |
+| LLM | `DOCINTEL_LLM_MODEL` | `nim:<model>` (default), `openai-compatible:<model>`, or any Pydantic AI model string |
 
-## Project layout
-
-```text
-src/docintel/
-  models/      # domain: framework-free dataclasses and rules
-  shared/      # application: ports, use cases, composition root
-  routers/     # API (versioned: v1alpha1)
-  utils/       # providers (adapters), tracking, common helpers
-tests/         # unit_tests, api_tests, backtesting (evals), stress_tests
-alembic/  assets/  config/  docker/  docs/  scripts/
-```
-
-## Architecture
-
-A modular monolith with dependencies pointing inward: `routers` and `utils/providers` depend on `shared`, which depends on `models`. Two import-linter contracts check this during `scripts/check.sh`.
-
-The Postgres-backed job queue claims work with `FOR UPDATE SKIP LOCKED`. State changes and domain events are committed atomically; an outbox relay dispatches events at least once, so handlers are idempotent. See the [architecture guide](docs/developer-guide/architecture.md) and the [implementation guide](docs/developer-guide/explanation/implementation-guide.md).
-
-## Development
-
-```bash
-scripts/check.sh
-```
-
-The implementation proceeds in milestones. M0 supplies the package layout, local dependencies, and architecture guardrails; later milestones add the domain, application workflow, persistence, parsing, extraction, review, and operations.
+See the [architecture](docs/developer-guide/architecture.md) and the ADRs in `docs/developer-guide/adr/`. Run the quality gates with `scripts/check.sh`.

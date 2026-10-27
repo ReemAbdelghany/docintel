@@ -5,5 +5,4 @@ nav:
   - Developer guide:
       - Architecture: developer-guide/architecture.md
       - Setup: developer-guide/setup.md
-      - Implementation guide: developer-guide/explanation/implementation-guide.md
   - Changelog: CHANGELOG.md
