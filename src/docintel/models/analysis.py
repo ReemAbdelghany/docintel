@@ -75,6 +75,7 @@ class DocumentAnalysis:
         self.document_id, self.case_id = document_id, case_id
         self.filename, self.storage_uri = filename, storage_uri
         self.status = DocumentStatus.RECEIVED
+        self.parsed_uri: str | None = None
         self.document_type: DocumentType | None = None
         self.classification_confidence: Confidence | None = None
         self.extractions: list[Extraction] = []
@@ -86,8 +87,10 @@ class DocumentAnalysis:
             raise IllegalTransition(f"{self.status} -> {to}")
         self.status = to
 
-    def record_parse(self) -> None:
+    def record_parse(self, parsed_uri: str) -> None:
+        """Record that parsing finished and where the parsed document is stored."""
         self._move(DocumentStatus.PARSED)
+        self.parsed_uri = parsed_uri
         self._events.append(DocumentParsed(self.document_id))
 
     def classify(self, doc_type: DocumentType, confidence: Confidence) -> None:

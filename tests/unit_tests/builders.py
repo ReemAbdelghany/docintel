@@ -43,7 +43,7 @@ def an_extracted_analysis(
     evidence: tuple[Evidence, ...] = REQUIRED_EVIDENCE,
 ) -> DocumentAnalysis:
     analysis = a_new_analysis()
-    analysis.record_parse()
+    analysis.record_parse("memory://parsed/x.json")
     analysis.classify(DocumentType.INVOICE, Confidence(0.95))
     analysis.record_extraction(an_invoice(), evidence, a_provenance())
     return analysis

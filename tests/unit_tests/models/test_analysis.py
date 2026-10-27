@@ -110,7 +110,7 @@ def test_current_extraction_requires_one_to_exist() -> None:
 
 def test_events_are_raised_in_order_and_pulled_once() -> None:
     analysis = a_new_analysis()
-    analysis.record_parse()
+    analysis.record_parse("memory://parsed/x.json")
     analysis.classify(DocumentType.INVOICE, Confidence(0.9))
     analysis.record_extraction(an_invoice(), (), a_provenance())
     analysis.record_verification([])

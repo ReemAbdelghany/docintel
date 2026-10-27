@@ -25,6 +25,10 @@ class UnsupportedFormat(PermanentError):
     """The file type is not handled."""
 
 
+class BlobNotFound(PermanentError):
+    """The stored file is missing."""
+
+
 class ProviderRejected(PermanentError):
     """The provider refused the request (bad key or configuration)."""
 
