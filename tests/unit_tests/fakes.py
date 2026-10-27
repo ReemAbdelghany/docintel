@@ -7,11 +7,17 @@ from uuid import UUID, uuid4
 
 from docintel.models.analysis import DocumentAnalysis
 from docintel.models.errors import BlobNotFound, NotFound, ProviderUnavailable
-from docintel.models.events import DocumentParsed, DocumentSubmitted, DomainEvent
+from docintel.models.events import (
+    DocumentParsed,
+    DocumentSubmitted,
+    DomainEvent,
+    ReviewRequested,
+)
+from docintel.models.facts import InvoiceFacts
 from docintel.models.onboarding_case import OnboardingCase
 from docintel.models.parsed import Page, ParsedDocument
 from docintel.models.states import DocumentStatus
-from docintel.models.values import Confidence, DocumentType
+from docintel.models.values import Confidence, DocumentType, Evidence
 from docintel.shared.ports import ExtractionOutcome
 from docintel.shared.use_cases.process_document import (
     AnalyzeDocument,
@@ -20,6 +26,10 @@ from docintel.shared.use_cases.process_document import (
 )
 from docintel.shared.use_cases.submit_document import SubmitDocument
 from tests.unit_tests.builders import REQUIRED_EVIDENCE, a_provenance, an_invoice
+
+PAGE_TEXT = (
+    "Acme Supplies\nInvoice INV-001\nDate 2026-01-15\nSubtotal 1000.00\nTax 150.00\nTotal 1150.00"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,21 +149,33 @@ class FakeParser:
     async def parse(self, content: bytes, filename: str) -> ParsedDocument:
         self._store.assert_no_open_transaction()
         self.calls += 1
-        return ParsedDocument((Page(1, "Acme Supplies\nINV-001\nTotal 1150.00"),))
+        return ParsedDocument((Page(1, PAGE_TEXT),))
 
 
 class FakeClassifier:
-    def __init__(self, store: Store, doc_type: DocumentType = DocumentType.INVOICE) -> None:
-        self._store, self._doc_type = store, doc_type
+    def __init__(
+        self,
+        store: Store,
+        doc_type: DocumentType = DocumentType.INVOICE,
+        confidence: float = 0.95,
+    ) -> None:
+        self._store, self._doc_type, self._confidence = store, doc_type, confidence
 
     async def classify(self, doc: ParsedDocument) -> tuple[DocumentType, Confidence]:
         self._store.assert_no_open_transaction()
-        return self._doc_type, Confidence(0.95)
+        return self._doc_type, Confidence(self._confidence)
 
 
 class FakeExtractor:
-    def __init__(self, store: Store, fail_times: int = 0) -> None:
+    def __init__(
+        self,
+        store: Store,
+        fail_times: int = 0,
+        facts: InvoiceFacts | None = None,
+        evidence: tuple[Evidence, ...] = REQUIRED_EVIDENCE,
+    ) -> None:
         self._store, self._fail_times = store, fail_times
+        self._facts, self._evidence = facts or an_invoice(), evidence
         self.calls = 0
 
     async def extract(self, doc: ParsedDocument) -> ExtractionOutcome:
@@ -161,7 +183,7 @@ class FakeExtractor:
         self.calls += 1
         if self.calls <= self._fail_times:
             raise ProviderUnavailable("simulated outage")
-        return ExtractionOutcome(an_invoice(), REQUIRED_EVIDENCE, a_provenance())
+        return ExtractionOutcome(self._facts, self._evidence, a_provenance())
 
 
 class NullTelemetry:
@@ -184,6 +206,9 @@ class Pipeline:
         self,
         doc_type: DocumentType = DocumentType.INVOICE,
         extractor_failures: int = 0,
+        facts: InvoiceFacts | None = None,
+        evidence: tuple[Evidence, ...] = REQUIRED_EVIDENCE,
+        classification_confidence: float = 0.95,
     ) -> None:
         self.store = Store()
         self.case_id = uuid4()
@@ -195,14 +220,14 @@ class Pipeline:
 
         telemetry = NullTelemetry()
         self.parser = FakeParser(self.store)
-        self.extractor = FakeExtractor(self.store, fail_times=extractor_failures)
+        self.extractor = FakeExtractor(self.store, extractor_failures, facts, evidence)
         self.submit_document = SubmitDocument(uow, blobs)
         self.start = StartAnalysis(uow)
         self.parse = ParseDocument(uow, blobs, self.parser, telemetry)
         self.analyze = AnalyzeDocument(
             uow,
             blobs,
-            FakeClassifier(self.store, doc_type),
+            FakeClassifier(self.store, doc_type, classification_confidence),
             {DocumentType.INVOICE: self.extractor},
             telemetry,
         )
@@ -240,3 +265,9 @@ class Pipeline:
 
     def events_of(self, document_id: UUID) -> list[type[DomainEvent]]:
         return [type(e) for e in self.store.events if e.document_id == document_id]
+
+    def review_reasons(self, document_id: UUID) -> tuple[str, ...]:
+        for event in self.store.events:
+            if isinstance(event, ReviewRequested) and event.document_id == document_id:
+                return event.reasons
+        return ()

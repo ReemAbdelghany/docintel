@@ -65,13 +65,14 @@ async def test_oversized_upload_is_refused_before_anything_is_stored(
     assert pipeline.store.events == []
 
 
-async def test_unsupported_document_type_fails_with_a_reason() -> None:
+async def test_unsupported_document_type_goes_to_review() -> None:
     pipeline = Pipeline(doc_type=DocumentType.LEASE)  # no lease extractor until M10
     document_id = await pipeline.submit()
 
     await pipeline.run_all()
 
-    assert pipeline.status(document_id) is DocumentStatus.FAILED
+    assert pipeline.status(document_id) is DocumentStatus.NEEDS_REVIEW
+    assert pipeline.review_reasons(document_id) == ("UNSUPPORTED_DOCUMENT_TYPE",)
 
 
 async def test_a_transient_provider_failure_is_resumed_by_a_retry() -> None:
