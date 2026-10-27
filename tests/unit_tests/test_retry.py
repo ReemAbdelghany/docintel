@@ -1,5 +1,5 @@
 import pytest
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelHTTPError, ModelTimeoutError
 
 from docintel.shared.errors import ProviderRejected, ProviderUnavailable
 from docintel.utils.common.retry import with_retries
@@ -42,3 +42,18 @@ async def test_a_chain_failing_only_with_client_errors_is_rejected_without_retri
     with pytest.raises(ProviderRejected):
         await with_retries(call, attempts=5, base=0)
     assert calls == 1
+
+
+async def test_a_timeout_on_every_model_is_retried_not_rejected() -> None:
+    calls = 0
+
+    async def call() -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            timeout = ModelTimeoutError(model_name="m", message="Request timed out.")
+            raise ExceptionGroup("all models failed", [timeout, timeout])
+        return "ok"
+
+    assert await with_retries(call, attempts=3, base=0) == "ok"
+    assert calls == 2
