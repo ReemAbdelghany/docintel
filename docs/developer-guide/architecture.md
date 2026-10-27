@@ -19,7 +19,7 @@ This is the style described in the book *Architecture Patterns with Python* (Per
 **The rule:** dependencies point inward only.
 
 ```
-  routers + utils/providers (FastAPI, worker, SQLAlchemy, Docling, Pydantic AI, S3)
+  routers + utils/providers (FastAPI, worker, SQLAlchemy, Docling/Unstructured, Pydantic AI, S3/local disk)
         |  depends on
         v
   shared (use cases, unit of work, ports = Protocols)
@@ -182,10 +182,10 @@ src/docintel/
     common/                  # ids, clock, hashing
     image_processing/        # scan and page preprocessing for OCR
     providers/               # ADAPTERS
-      parsing/               # DoclingParser (+ a second adapter)
+      parsing/               # DoclingParser, UnstructuredParser (+ a plain-text fake)
       llm/                   # Pydantic AI agents, LLM schemas, mappers (ACL)
       db/                    # SQLAlchemy tables, repositories, unit of work
-      storage/               # S3-compatible BlobStore
+      storage/               # S3-compatible and local-disk BlobStore
       queue/                 # Postgres job queue and outbox relay
     tracking/                # logging, tracing, metrics setup
 tests/
@@ -201,9 +201,9 @@ tests/
 
 Each port is a `typing.Protocol` defined in `shared/ports.py`; its implementation lives in `utils/providers/`.
 
-- **DocumentParser** -> `DoclingParser` (default). A second adapter proves the abstraction is real. Docling runs locally, which matters for sensitive financial documents.
-- **Classifier / Extractor** -> Pydantic AI agents. Model is chosen by configuration string, so providers can be swapped without code changes. Use a fallback model for provider outages and a concurrency limit per provider.
-- **BlobStore** -> S3-compatible (MinIO locally).
+- **DocumentParser** -> `DoclingParser` (default) or `UnstructuredParser`, chosen by `parser_backend`. Two real adapters prove the abstraction, and one contract-test suite runs against both. Both run locally, which matters for sensitive financial documents.
+- **Classifier / Extractor** -> Pydantic AI agents. Model is chosen by a configuration string (`nim:<model>` for NVIDIA NIM, `openai-compatible:<model>` for any compatible server, or a native Pydantic AI string such as `anthropic:<model>`), so providers swap without code changes. Use a fallback model for provider outages and a concurrency limit per provider.
+- **BlobStore** -> S3-compatible (MinIO locally) or local disk, chosen by `storage_backend`; stored URIs carry their scheme.
 - **JobQueue** -> Postgres `jobs` table claimed with `FOR UPDATE SKIP LOCKED`; enqueueing can share the transaction that changes aggregate state.
 - **EventPublisher** -> the outbox relay target (webhook or stream).
 - **UnitOfWork** -> SQLAlchemy session per use case, committing results and outbox events atomically.
@@ -234,7 +234,7 @@ A small exception hierarchy in the domain:
 - **Traces:** OpenTelemetry spans per stage, nested under one trace per document. Pydantic AI's built-in instrumentation adds spans for model calls and tool calls, with token usage.
 - **Metrics:** documents processed by type and outcome, stage duration histograms, LLM tokens and estimated cost per document, review rate, queue depth, retry counts.
 - **Health:** `/healthz` (liveness) and `/readyz` (checks database, queue, storage).
-- **Demo artifact:** generate an AgentCanvas report from a real trace and include it in the repo, so anyone can see the flow and cost without running anything.
+- **Demo artifact:** generate an AgentCanvas report (it reads traces from Logfire, so run it on a synthetic document) and include it in the repo, so anyone can see the flow and cost without running anything.
 - **SLO to state:** fast turnaround matters after sign-up, so define a target such as "95 percent of documents processed within X seconds, a full packet within Y minutes" and show the dashboard panel for it. Pick numbers from your own measurements and label them as initial targets.
 
 ### Security and privacy
@@ -287,7 +287,7 @@ A small exception hierarchy in the domain:
 2. **FastAPI + Pydantic v2.** Standard async Python API stack; shares the validation model with the LLM layer.
 3. **SQLAlchemy 2.0 + Alembic + Postgres.** Rejected: NoSQL (workflow state needs transactions), raw SQL (testability and migrations).
 4. **Repository + Unit of Work.** Rejected: active record (couples domain to ORM).
-5. **Docling as default parser behind a port.** Local execution for sensitive documents, layout and table understanding, OCR support. A second adapter demonstrates swappability.
+5. **Docling as default parser behind a port, with Unstructured as the second adapter.** Local execution for sensitive documents, layout and table understanding, OCR support. A second real adapter demonstrates swappability and gives the evals something to compare.
 6. **Pydantic AI for LLM access.** Rejected: LangChain (heavier abstractions for a fixed pipeline), hand-rolled JSON prompting (no typed validation, fragile).
 7. **Classify then extract per type.** Rejected: single universal prompt.
 8. **Deterministic validators plus grounding check, with human review.** Rejected: trusting model confidence alone.
@@ -299,6 +299,8 @@ A small exception hierarchy in the domain:
 14. **Rich aggregates with invariants; plain dataclasses in the domain.** Rejected: anemic models with the logic in services, and Pydantic models as domain entities (couples the domain to a library and to the LLM schema).
 15. **Domain and integration events are persisted to the outbox and dispatched by a relay.** Events crossing contexts live in `shared/contracts/`; external integration events are versioned. Rejected: dispatching domain events only in-process after commit (a crash can lose them), one event type for both (internal refactors would break consumers), a broker now (extra infrastructure without a need).
 16. **No event sourcing and no CQRS.** Rejected for cost; status and history tables give the audit trail.
+17. **Hosted NVIDIA NIM as the default LLM, through its OpenAI-compatible API.** Model strings select the provider, so Anthropic, OpenAI or a local server are one setting away. Rejected: hard-wiring one vendor SDK, and relying on NIM-specific constrained decoding that is unconfirmed on the hosted endpoint.
+18. **Two blob stores, local disk and S3/MinIO, behind one port.** The local store lets anyone run the service with no containers; S3 is the production path. Stored URIs carry their scheme.
 
 ## 13. Common questions, with short answers
 
@@ -326,6 +328,6 @@ A small exception hierarchy in the domain:
 ## 15. Open items to decide
 
 - Arabic and scanned-document support: in or out of scope? It affects OCR configuration and your eval set.
-- LLM provider and model for the project, and whether it supports native structured output (check this before committing).
+- ~~LLM provider~~ Resolved: NVIDIA NIM by default (decision 17). Still to check: which hosted model gives the best field accuracy on the golden set with tool output, and whether the hosted endpoint honors `guided_json`.
 - Queue implementation (decision 9).
 - Whether to build a minimal review page or keep review API-only.

@@ -49,6 +49,7 @@ Two entry points sit next to `main.py` because they are process entry points and
 - **Two choices are resolved here.** First, the queue is a Postgres table claimed with `FOR UPDATE SKIP LOCKED`, behind the `JobQueue` port. A job is then enqueued in the same transaction as the state change, there is one fewer service to run, and the state is visible with plain SQL. SQS or Celery become another adapter at scale. Second, domain events are written to an outbox table in the same transaction and dispatched by a relay worker, at least once, so handlers must be idempotent. This tightens the 'dispatch after commit' wording in the architecture guide; update it to match.
 - **Events that cross a context boundary are defined in `models/events.py`** (domain code may not import from `shared/`) and re-exported from `shared/contracts/`, which also holds the versioned integration events for outside systems.
 - **Two import-linter contracts replace the old folder boundaries.** `docintel.models` imports no frameworks and nothing from the outer layers; `docintel.shared` depends on ports, never on `utils/providers`, `routers` or a framework. Keeping the three contexts apart inside `models/` and `shared/` is a naming convention reviewed in pull requests, no longer a tool-enforced rule.
+- **Storage, parsers and LLMs are swappable by configuration.** Each sits behind a port in `shared/ports.py`, and `bootstrap.py` picks the adapter from one setting: `storage_backend` (`local` or `s3`), `parser_backend` (`docling` or `unstructured`) and `llm_model` (`nim:<model>`, `openai-compatible:<model>`, or any Pydantic AI model string). The default LLM is a hosted NVIDIA NIM model through its OpenAI-compatible API. Every port also has an in-memory fake, so the test suite needs no key, no Docker and no model download.
 - **Run every command from the repository root.** The quality gates live in `scripts/check.sh`, the local services in `scripts/up.sh` and `scripts/down.sh`.
 - **Test the domain and application layers first** (M1, M2). They run in milliseconds and carry most of the design.
 - Snippets are trimmed for reading. Add imports and type annotations as you go; mypy in strict mode will tell you what is missing.
@@ -60,9 +61,9 @@ Two entry points sit next to `main.py` because they are process entry points and
 | M0 | Skeleton, tooling, architecture guardrails | `scripts/check.sh` passes on the empty project and import-linter runs in it |
 | M1 | Domain core of the Understanding context | Aggregate tests pass with no I/O |
 | M2 | Application layer with in-memory fakes | The full pipeline runs in a test with fake adapters |
-| M3 | Postgres, blob storage, API | Upload, then read status, with curl against docker compose |
-| M4 | Docling parser adapter | A sample PDF parses with page numbers |
-| M5 | LLM adapters (classifier, invoice extractor) | Extraction works with `TestModel` in tests and a real model in a manual run |
+| M3 | Postgres, blob storage (local disk and S3/MinIO), API | Upload, then read status, with curl; the same flow works with `storage_backend=local` and `=s3` |
+| M4 | Parser adapters: Docling and Unstructured | A sample PDF parses with page numbers through either parser, chosen by one setting |
+| M5 | LLM adapters (classifier, invoice extractor), NVIDIA NIM by default | Extraction works with `TestModel` in tests and a real NIM model in a manual run; changing `DOCINTEL_LLM_MODEL` swaps provider |
 | M6 | Verification and review policy | A wrong invoice lands in `NEEDS_REVIEW` |
 | M7 | Queue, retries, outbox | Kill the worker mid-job: the document still completes and the event is published |
 | M8 | Observability | One trace per document, JSON logs with ids, a metrics endpoint |
@@ -183,10 +184,18 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='DOCINTEL_', env_file='config/.env')
 
     database_url: str = 'postgresql+asyncpg://docintel:docintel@localhost:5432/docintel'
+    storage_backend: Literal['local', 's3'] = 'local'
+    local_storage_path: Path = Path('storage')
     s3_endpoint: str = 'http://localhost:9000'
     s3_bucket: str = 'documents'
-    llm_model: str                      # 'provider:model-name', from the environment
+    parser_backend: Literal['docling', 'unstructured'] = 'docling'
+    unstructured_strategy: str = 'auto'
+    llm_model: str                      # 'nim:meta/llama-3.3-70b-instruct', 'anthropic:...', from the environment
     classifier_model: str
+    llm_output_mode: Literal['tool', 'prompted'] = 'tool'
+    nvidia_api_key: SecretStr = SecretStr('')           # from build.nvidia.com, for 'nim:' models
+    llm_base_url: str = ''                              # for 'openai-compatible:' models
+    llm_api_key: SecretStr = SecretStr('')
     llm_fallbacks: list[str] = []
     llm_concurrency: int = 4
     min_classification_confidence: float = 0.7
@@ -682,6 +691,8 @@ Serialize facts with a small registry (`facts_type` to class) in `utils/provider
 
 ### Blob storage
 
+Two real adapters sit behind the one `BlobStore` port. The stored URI carries its scheme (`s3://bucket/key` or `local://key`), so a document records where its bytes live.
+
 ```python
 # utils/providers/storage/s3_blob_store.py
 class S3BlobStore:
@@ -698,9 +709,61 @@ class S3BlobStore:
         async with self._session.client('s3', endpoint_url=self._cfg.s3_endpoint) as s3:
             obj = await s3.get_object(Bucket=bucket, Key=key)
             return await obj['Body'].read()
+
+# utils/providers/storage/local_blob_store.py: zero-dependency adapter for development and demos
+class LocalBlobStore:
+    def __init__(self, root: Path) -> None:
+        self._root = root.resolve()
+
+    def _path(self, key: str) -> Path:
+        path = (self._root / key).resolve()
+        if not path.is_relative_to(self._root):             # keys come from our code, but never trust a path
+            raise ValueError('storage key escapes the storage root')
+        return path
+
+    async def put(self, key: str, data: bytes) -> str:
+        path = self._path(key)
+        await asyncio.to_thread(self._write, path, data)     # blocking disk I/O off the event loop
+        return f'local://{key}'
+
+    async def get(self, uri: str) -> bytes:
+        return await asyncio.to_thread(self._path(uri.removeprefix('local://')).read_bytes)
+
+    @staticmethod
+    def _write(path: Path, data: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+# utils/providers/storage/__init__.py
+def make_blob_store(settings: Settings) -> BlobStore:
+    match settings.storage_backend:
+        case 'local':
+            return LocalBlobStore(settings.local_storage_path)
+        case 's3':
+            return S3BlobStore(settings)
 ```
 
-Credentials come from the standard `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` variables (the MinIO values from compose locally). Create the bucket in a one-off `scripts/init_storage.py`.
+`bootstrap.py` calls `make_blob_store(settings)`; nothing else knows which one is in use. The default is `local`, so a reviewer can run the whole service without Docker; set `DOCINTEL_STORAGE_BACKEND=s3` for MinIO or real S3. The local directory is git-ignored (`storage/`). Credentials for S3 come from the standard `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` variables (the MinIO values from compose locally). Create the bucket in a one-off `scripts/init_storage.py`.
+
+Switching backends does not migrate existing blobs; a stored URI keeps pointing at the backend that wrote it. If you need a mixed store, add a small router adapter that dispatches on the URI scheme.
+
+**Prove the abstraction.** Run one contract suite against the in-memory fake, the local store and (marked `integration`) S3:
+
+```python
+@pytest.fixture(params=['memory', 'local', pytest.param('s3', marks=pytest.mark.integration)])
+def store(request: pytest.FixtureRequest, tmp_path: Path) -> BlobStore:
+    return make_test_store(request.param, tmp_path)
+
+async def test_round_trip(store):
+    uri = await store.put('cases/c1/doc.pdf', b'abc')
+    assert await store.get(uri) == b'abc'
+
+async def test_missing_key_raises(store):
+    with pytest.raises(BlobNotFound):
+        await store.get(await store.put('x', b'1') + '-missing')
+```
+
+Add a `ValueError` test for a `../` key on the local store.
 
 ### Intake use case and the cross-context handoff
 
@@ -776,7 +839,8 @@ def build_container(settings: Settings) -> Container:
     def uow_factory() -> SqlUnitOfWork:
         return SqlUnitOfWork(sessions)
 
-    blobs = S3BlobStore(settings)
+    blobs = make_blob_store(settings)                # local disk or S3, from settings
+    parser = make_parser(settings)                   # Docling or Unstructured, from settings
     return Container(
         submit_document=SubmitDocument(uow_factory, blobs),
         queries=SqlQueries(sessions),
@@ -821,9 +885,9 @@ curl -F file=@assets/Examples/invoice.pdf localhost:8000/v1alpha1/cases/<case-uu
 curl localhost:8000/v1alpha1/documents/<document-uuid>
 ```
 
-## 6. M4: Docling parser adapter
+## 6. M4: Parser adapters: Docling and Unstructured
 
-**Goal:** turn a PDF or image into a `ParsedDocument` with real page numbers, behind the `DocumentParser` port.
+**Goal:** turn a PDF or image into a `ParsedDocument` with real page numbers, behind the `DocumentParser` port, with two real adapters (Docling and Unstructured) chosen by `parser_backend`.
 
 ```python
 # utils/providers/parsing/docling_parser.py
@@ -870,12 +934,63 @@ Notes:
 - Attribute names (`iterate_items`, `prov`, `page_no`, `TableItem`) match the library as I know it; confirm against your installed version.
 - For scans and Arabic text, check Docling's OCR options for language settings and add one scanned page and one Arabic invoice to `assets/Examples/`. Page and scan preprocessing (deskewing, rotation, contrast) belongs in `utils/image_processing/`, called by the parser adapter, never by the domain. If it is out of scope, say so in the README rather than leaving the gap implicit.
 
-**Prove the abstraction.** Write a second adapter, `PlainTextParser` in `utils/providers/parsing/plain_text_parser.py` (reads `.txt` and returns one page per form feed). It is 15 lines, and it lets end-to-end tests run without loading Docling. Then run one contract test suite against both:
+**The second adapter: Unstructured.** A real alternative proves the port better than a toy. Its dependencies are heavy, so make them an optional extra (`uv add --optional unstructured 'unstructured[pdf]'`) and import the library lazily. It also needs system packages: poppler, tesseract and libmagic.
 
 ```python
-@pytest.fixture(params=['docling', 'plain'])
+# utils/providers/parsing/unstructured_parser.py
+class UnstructuredParser:
+    def __init__(self, strategy: str = 'auto') -> None:
+        self._strategy = strategy                                # 'fast', 'hi_res' or 'ocr_only'; 'auto' picks
+
+    async def parse(self, content: bytes, filename: str) -> ParsedDocument:
+        suffix = Path(filename).suffix.lower()
+        if suffix not in SUPPORTED:
+            raise UnsupportedFormat(suffix)
+        return await asyncio.to_thread(self._parse_sync, content, suffix)
+
+    def _parse_sync(self, content: bytes, suffix: str) -> ParsedDocument:
+        from unstructured.partition.auto import partition        # lazy: optional heavy extra
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f'input{suffix}'
+            path.write_bytes(content)
+            try:
+                elements = partition(filename=str(path), strategy=self._strategy)
+            except Exception as exc:                             # adapter boundary again
+                raise CorruptDocument(str(exc)) from exc
+        pages: dict[int, list[str]] = defaultdict(list)
+        for element in elements:
+            if element.text:
+                pages[element.metadata.page_number or 1].append(element.text)
+        if not pages:
+            raise CorruptDocument('no text could be extracted')
+        return ParsedDocument(tuple(Page(n, '\n'.join(parts)) for n, parts in sorted(pages.items())))
+
+# utils/providers/parsing/__init__.py
+def make_parser(settings: Settings) -> DocumentParser:
+    match settings.parser_backend:
+        case 'docling':
+            return DoclingParser()
+        case 'unstructured':
+            return UnstructuredParser(settings.unstructured_strategy)
+```
+
+Notes:
+
+- Strategies matter: `fast` reads embedded text with pdfminer, `hi_res` runs layout detection and is the only one that extracts tables, `ocr_only` runs Tesseract. `auto` falls back to OCR when a PDF has no text.
+- Confirm that `metadata.page_number` is populated for PDFs in your installed version; the documentation excerpt I could read only spelled it out for DOCX.
+- Table cells arrive as plain `element.text`, which keeps the numbers searchable for the grounding check in M6.
+- Unstructured does not return Docling's reading order or table structure, so expect different page text. That difference is exactly what the evals in M9 should measure: run the golden set under both parsers and report the field accuracy of each.
+
+**A key-free fake for end-to-end tests.** Add `PlainTextParser` in `utils/providers/parsing/plain_text_parser.py` (reads `.txt` and returns one page per form feed, 15 lines). It lets end-to-end tests run without loading Docling or Unstructured.
+
+**Prove the abstraction.** Run one contract suite against all three:
+
+```python
+@pytest.fixture(params=['docling', 'unstructured', 'plain'])
 def parser(request: pytest.FixtureRequest) -> DocumentParser:
-    return make_parser(request.param)
+    if request.param == 'unstructured':
+        pytest.importorskip('unstructured')                  # optional extra
+    return make_test_parser(request.param)
 
 async def test_pages_are_numbered_from_one(parser, sample_for):
     parsed = await parser.parse(*sample_for(parser))
@@ -890,7 +1005,9 @@ async def test_unknown_extension_is_unsupported(parser):
         await parser.parse(b'x', 'file.xyz')
 ```
 
-**Check:** `uv run python scripts/try_parse.py assets/Examples/invoice.pdf` prints each page's number and the first 200 characters of its text.
+**Borrowed idea, optional third adapter.** The `ocr_parsing` example in the pydantic-ai-examples repository converts each PDF page to an image and sends it to a vision model, which handles scans uniformly, with an asyncio semaphore capping concurrent requests. If you have time, add a `VisionParser` that uses page rendering from `utils/image_processing/` and the same concurrency-limited model wrapper as M5. It satisfies the same `DocumentParser` contract, costs tokens per page, and is the natural answer for scans and Arabic documents. The semaphore is the same idea as `ConcurrencyLimitedModel` below.
+
+**Check:** `uv run python scripts/try_parse.py assets/Examples/invoice.pdf --parser docling` (and `--parser unstructured`) prints each page's number and the first 200 characters of its text.
 
 ## 7. M5: LLM adapters
 
@@ -900,30 +1017,58 @@ async def test_unknown_extension_is_unsupported(parser):
 
 All LLM adapter code lives in `utils/providers/llm/`: `models.py` (this factory), `schemas.py`, `prompts.py`, `invoice_extractor.py`, `classifier.py` and `mappers.py`.
 
-Model names come from settings, never from code. A concurrency cap and a fallback chain wrap them:
+Model names come from settings, never from code. A small factory turns a spec string into a Pydantic AI model. A concurrency cap and a fallback chain wrap the result:
 
 ```python
+from openai import AsyncOpenAI
 from pydantic_ai import ConcurrencyLimitedModel
+from pydantic_ai.models import Model
 from pydantic_ai.models.fallback import FallbackModel
-
-def build_model(names: list[str], concurrency: int) -> Model:
-    limited = [ConcurrencyLimitedModel(name, limiter=concurrency) for name in names]
-    return limited[0] if len(limited) == 1 else FallbackModel(*limited)
-
-model = build_model([settings.llm_model, *settings.llm_fallbacks], settings.llm_concurrency)
-```
-
-If you use an OpenAI-compatible endpoint such as NVIDIA's, build that model explicitly and pass it in place of the name:
-
-```python
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
+NIM_BASE_URL = 'https://integrate.api.nvidia.com/v1'
+
 def openai_compatible(name: str, base_url: str, api_key: str) -> OpenAIChatModel:
-    return OpenAIChatModel(name, provider=OpenAIProvider(base_url=base_url, api_key=api_key))
+    client = AsyncOpenAI(base_url=base_url, api_key=api_key, max_retries=0)   # the agent and our worker own retries
+    return OpenAIChatModel(name, provider=OpenAIProvider(openai_client=client))
+
+def resolve_model(spec: str, settings: Settings) -> Model | str:
+    """'nim:<id>' is NVIDIA NIM, 'openai-compatible:<id>' uses llm_base_url, anything else is a Pydantic AI model string."""
+    match spec.split(':', 1):
+        case ['nim', name]:
+            return openai_compatible(name, NIM_BASE_URL, settings.nvidia_api_key.get_secret_value())
+        case ['openai-compatible', name]:
+            return openai_compatible(name, settings.llm_base_url, settings.llm_api_key.get_secret_value())
+        case _:
+            return spec                                       # 'anthropic:...', 'openai:...' and so on
+
+def build_model(names: list[str], settings: Settings) -> Model:
+    limited = [ConcurrencyLimitedModel(resolve_model(n, settings), limiter=settings.llm_concurrency) for n in names]
+    return limited[0] if len(limited) == 1 else FallbackModel(*limited)
+
+model = build_model([settings.llm_model, *settings.llm_fallbacks], settings)
 ```
 
-Before committing to a model, confirm it supports native structured output (the model profile exposes this) and run your invoice fixtures through it. Models served through compatible endpoints sometimes fall back to prompt-based JSON, which fails more often.
+Swapping provider is then one environment variable: `DOCINTEL_LLM_MODEL=nim:meta/llama-3.3-70b-instruct`, `anthropic:<model>`, or `openai-compatible:<model>` with `DOCINTEL_LLM_BASE_URL` pointing at a local server. A fallback chain can even cross providers (`DOCINTEL_LLM_FALLBACKS`).
+
+**NVIDIA NIM specifics** (check each against the current NVIDIA documentation, because the hosted catalog changes):
+
+- The hosted endpoint is OpenAI-compatible Chat Completions at `https://integrate.api.nvidia.com/v1`, with an API key from build.nvidia.com. Use `OpenAIChatModel`, not the Responses-API model that the `openai:` prefix selects.
+- Model ids must be exact, for example `meta/llama-3.3-70b-instruct`; a shortened name returns 404.
+- Tool calling is enabled for the Llama 3.x family, so Pydantic AI's default **tool output** mode works: the schema is sent as a function the model must call. That is the default (`llm_output_mode='tool'`).
+- NIM also documents constrained decoding through `extra_body={'nvext': {'guided_json': schema}}`, but those docs describe self-hosted containers, and I could not confirm the hosted endpoint honors it for every model. Do not depend on it; test it before using it.
+- If a model you want has no tool calling, set `llm_output_mode='prompted'` (Pydantic AI's `PromptedOutput`: the schema goes into the prompt and the reply is parsed). It fails more often, which is what the validation retries and the review path are for.
+
+```python
+from pydantic_ai import Agent, PromptedOutput, ToolOutput
+
+def make_agent(model: Model, mode: str, instructions: str) -> Agent[None, LlmInvoice]:
+    output = ToolOutput(LlmInvoice) if mode == 'tool' else PromptedOutput(LlmInvoice)
+    return Agent(model, output_type=output, instructions=instructions, retries=2)
+```
+
+Before committing to a model, run your invoice fixtures through it and record the field accuracy per model in the M9 report. That table (NIM Llama versus a second provider) is the strongest evidence that the LLM really is swappable.
 
 ### The LLM-facing schema is not the domain model
 

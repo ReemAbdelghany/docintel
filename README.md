@@ -17,6 +17,14 @@ scripts/check.sh     # lint, types, architecture contracts, tests
 
 The API entrypoint is `src/docintel/main.py`. Database migrations and the API/worker services are added in later milestones.
 
+## Swappable by configuration
+
+| Capability | Setting | Adapters |
+| --- | --- | --- |
+| Storage | `DOCINTEL_STORAGE_BACKEND` | `local` (default), `s3` (MinIO or AWS) |
+| Parser | `DOCINTEL_PARSER_BACKEND` | `docling` (default), `unstructured` |
+| LLM | `DOCINTEL_LLM_MODEL` | `nim:<model>` (NVIDIA NIM, default), `openai-compatible:<model>`, or any Pydantic AI model string |
+
 ## Project layout
 
 ```text

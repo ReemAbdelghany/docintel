@@ -19,3 +19,4 @@ build/
 tests/backtesting/reports/generated/
 .import_linter_cache/
 wheels/
+storage/
