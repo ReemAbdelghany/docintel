@@ -1,8 +1,10 @@
 """FastAPI entrypoint."""
 
 import logging
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
@@ -87,7 +89,15 @@ async def readyz(response: Response) -> dict[str, str]:
 
 
 def main() -> None:
-    uvicorn.run("docintel.main:app", host="127.0.0.1", port=8000)
+    """Run the API. Pass --reload to restart on code changes while developing."""
+    reload = "--reload" in sys.argv[1:]
+    uvicorn.run(
+        "docintel.main:app",
+        host="127.0.0.1",
+        port=8000,
+        reload=reload,
+        reload_dirs=[str(Path(__file__).resolve().parent)] if reload else None,
+    )
 
 
 if __name__ == "__main__":
