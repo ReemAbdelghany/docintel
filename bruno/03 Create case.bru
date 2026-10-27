@@ -1,0 +1,26 @@
+meta {
+  name: 03 Create case
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{host}}/v1alpha1/cases
+  body: none
+  auth: none
+}
+
+script:post-response {
+  bru.setVar("case_id", res.body.case_id);
+}
+
+tests {
+  test("case is created", function () {
+    expect(res.status).to.equal(201);
+    expect(res.body.case_id).to.be.a("string");
+  });
+}
+
+docs {
+  Flow step 1. Creates an onboarding case and saves it as `case_id`.
+}

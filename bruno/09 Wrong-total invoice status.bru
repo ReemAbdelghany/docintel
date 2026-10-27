@@ -1,0 +1,36 @@
+meta {
+  name: 09 Wrong-total invoice status
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{host}}/v1alpha1/documents/{{wrong_id}}
+  body: none
+  auth: none
+}
+
+script:pre-request {
+  // The pipeline is asynchronous (parse, classify, LLM). Wait until it settles.
+  const axios = require("axios");
+  const url = bru.interpolate("{{host}}/v1alpha1/documents/{{wrong_id}}");
+  const settled = ["accepted", "needs_review", "failed"];
+  for (let i = 0; i < 90; i++) {
+    const r = await axios.get(url, { validateStatus: () => true });
+    if (r.status === 200 && settled.includes(r.data.status)) break;
+    await bru.sleep(4000);
+  }
+}
+
+tests {
+  test("a wrong total is never accepted, it goes to review with a reason", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.status).to.equal("needs_review");
+    const codes = res.body.findings.map((f) => f.code);
+    expect(codes.some((c) => c.startsWith("TOTAL_MISMATCH"))).to.equal(true);
+  });
+}
+
+docs {
+  The core principle: a wrong number is worse than a missing one, so flag it for a person.
+}

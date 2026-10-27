@@ -1,0 +1,18 @@
+meta {
+  name: 02 Readiness
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{host}}/readyz
+  body: none
+  auth: none
+}
+
+tests {
+  test("database is reachable", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.database).to.equal("up");
+  });
+}

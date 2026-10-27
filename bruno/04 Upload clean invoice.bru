@@ -1,0 +1,31 @@
+meta {
+  name: 04 Upload clean invoice
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{host}}/v1alpha1/cases/{{case_id}}/documents
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  file: @file(../assets/Examples/invoice_clean.pdf)
+}
+
+script:post-response {
+  bru.setVar("clean_id", res.body.document_id);
+}
+
+tests {
+  test("accepted for processing", function () {
+    expect(res.status).to.equal(202);
+    expect(res.body.duplicate).to.equal(false);
+  });
+}
+
+docs {
+  Flow step 2. Returns 202 at once; parsing and extraction run in the background.
+  Saves `clean_id`.
+}
