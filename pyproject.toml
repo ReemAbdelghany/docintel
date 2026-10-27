@@ -36,6 +36,7 @@ dev = [
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
     "pytest-cov>=6.1.1",
+    "reportlab>=5.1.0",
     "ruff>=0.11.5",
     "testcontainers[postgres]>=4.10.0",
 ]
@@ -54,6 +55,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "S"]
 [tool.mypy]
 strict = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["unstructured.*"]
+ignore_missing_imports = true  # optional extra, imported lazily
 
 [[tool.mypy.overrides]]
 module = ["aioboto3.*", "botocore.*"]
