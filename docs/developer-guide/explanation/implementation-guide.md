@@ -352,6 +352,7 @@ class DocumentAnalysis:
         self.document_id, self.case_id = document_id, case_id
         self.filename, self.storage_uri = filename, storage_uri
         self.status = DocumentStatus.RECEIVED
+        self.parsed_uri: str | None = None          # where the parsed document is stored
         self.document_type: DocumentType | None = None
         self.classification_confidence: Confidence | None = None
         self.extractions: list[Extraction] = []
@@ -363,8 +364,9 @@ class DocumentAnalysis:
             raise IllegalTransition(f'{self.status} -> {to}')
         self.status = to
 
-    def record_parse(self) -> None:
+    def record_parse(self, parsed_uri: str) -> None:
         self._move(S.PARSED)
+        self.parsed_uri = parsed_uri
         self._events.append(DocumentParsed(self.document_id))
 
     def classify(self, doc_type: DocumentType, confidence: Confidence) -> None:
@@ -526,11 +528,12 @@ class ParseDocument:
         content = await self._blobs.get(uri)
         with self._t.stage('parse', document_id=str(document_id)):
             parsed = await self._parser.parse(content, filename)
-        await self._blobs.put(f'parsed/{document_id}.json', serialize(parsed))
+        parsed_uri = await self._blobs.put(f'parsed/{document_id}.json', serialize(parsed))
         async with self._uow() as uow:
             analysis = await uow.analyses.get(document_id)
-            analysis.record_parse()
-            await uow.commit()
+            if analysis.status is DocumentStatus.RECEIVED:      # re-check: another worker may have won
+                analysis.record_parse(parsed_uri)
+                await uow.commit()
 ```
 
 `AnalyzeDocument` (same file) has the same shape for three more stages. It is triggered by the `DocumentParsed` event (M7) and its skeleton is:
