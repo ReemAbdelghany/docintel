@@ -1,4 +1,19 @@
-"""Deterministic checks on what the model extracted. Nothing here calls a model."""
+"""Deterministic verification rules for extracted document facts.
+
+This module implements all deterministic checks on model-extracted facts.
+**No model calls are made here** - all logic is pure Python operating on the
+structured output from the LLM and the parsed document text.
+
+The verification pipeline:
+1. locate_evidence: Ground model-provided quotes to actual document pages
+2. ground_by_value: Repair missing/ungrounded evidence by searching for the
+   extracted value itself in the document
+3. missing_facts: Check that all required facts are present and grounded
+4. derive_contract_values: Infer missing contract fields (currency, total_value)
+5. business_violations: Check business rules that can reject a readable document
+
+All functions are pure and testable without any external dependencies.
+"""
 
 import re
 from datetime import date
@@ -12,21 +27,47 @@ from docintel.routers.v1alpha1.schemas.document import (
 )
 from docintel.shared.document_types import ParsedPage
 
+# Tolerance for monetary comparisons (1 cent)
 TOLERANCE = Decimal("0.01")
+# Months per period for contract total calculation
 STEP_MONTHS = {"monthly": 1, "quarterly": 3, "yearly": 12}
+# Known ISO currency codes to search for in document text
 CURRENCY_CODES = ("EGP", "USD", "EUR", "GBP", "SAR", "AED", "KWD", "QAR")
+# Maximum characters to include in evidence snippets
 MAX_SNIPPET = 200
 
 Facts = InvoiceFacts | ContractFacts
 
 
 def _squash(text: str) -> str:
-    """Lowercase letters and digits only, so dashes, quotes, spacing and markup never matter."""
+    """Normalize text for fuzzy matching: lowercase alphanumeric only.
+
+    Removes all non-alphanumeric characters (punctuation, whitespace, symbols)
+    and lowercases. This allows matching quotes regardless of formatting
+    differences (dashes, quotes, spacing, currency symbols, etc.).
+
+    Args:
+        text: Input text to normalize.
+
+    Returns:
+        str: Lowercase alphanumeric-only string.
+    """
     return re.sub(r"[\W_]+", "", text.lower())
 
 
 def _candidates(value: object) -> list[str]:
-    """Ways a fact's value may be written in a document, squashed for comparison."""
+    """Generate all common textual representations of a fact value.
+
+    Produces squashed variants of a value as it might appear in a document.
+    Used for searching the parsed text when the model's quote is missing or
+    ungrounded but the value itself is correct.
+
+    Args:
+        value: The extracted fact value (date, Decimal, list, or other).
+
+    Returns:
+        list[str]: Squashed candidate strings to search for.
+    """
     if isinstance(value, date):
         month_long, month_short = value.strftime("%B"), value.strftime("%b")
         forms = [
@@ -49,7 +90,18 @@ def _candidates(value: object) -> list[str]:
 
 
 def _find_in_pages(candidates: list[str], pages: list[ParsedPage]) -> tuple[int, str] | None:
-    """The first line (and its page) that contains any candidate."""
+    """Search parsed pages for the first line containing any candidate.
+
+    Scans pages in order, lines in order, returning the first match with its
+    page number and the original line (truncated to MAX_SNIPPET).
+
+    Args:
+        candidates: Squashed strings to search for.
+        pages: Parsed document pages.
+
+    Returns:
+        tuple[int, str] | None: (page_number, matching_line) or None if not found.
+    """
     for page in pages:
         for line in page.text.splitlines():
             squashed = _squash(line)
@@ -61,7 +113,21 @@ def _find_in_pages(candidates: list[str], pages: list[ParsedPage]) -> tuple[int,
 def locate_evidence(
     evidence: list[FieldEvidence], pages: list[ParsedPage]
 ) -> tuple[list[FieldEvidence], list[Finding]]:
-    """Grounding: keep quotes that really appear in the document, and record their page."""
+    """Ground model-provided quotes to actual document pages.
+
+    For each evidence item, searches the parsed document for the exact quote
+    (normalized via _squash). If found, records the page number. If not found,
+    creates an UNGROUNDED_EVIDENCE finding.
+
+    Args:
+        evidence: List of FieldEvidence from the model (quotes without page numbers).
+        pages: Parsed document pages to search.
+
+    Returns:
+        tuple: (located_evidence, findings)
+            - located_evidence: Evidence items with page numbers filled in
+            - findings: UNGROUNDED_EVIDENCE findings for quotes not found
+    """
     located: list[FieldEvidence] = []
     findings: list[Finding] = []
     for item in evidence:
@@ -86,8 +152,24 @@ def ground_by_value(
     findings: list[Finding],
     pages: list[ParsedPage],
 ) -> tuple[list[FieldEvidence], list[Finding]]:
-    """The model's quote may be sloppy while its value is right. If the value itself appears in
-    the document (in any common format), use that line as the evidence instead."""
+    """Repair missing evidence by searching for the extracted value itself.
+
+    The model may extract the correct value but provide a sloppy/ungrounded quote.
+    This function searches for the value (in common formats) in the document text.
+    If found, adds new evidence with the correct quote and page. Removes any
+    MISSING_EVIDENCE findings for repaired fields.
+
+    Args:
+        facts: Extracted facts (InvoiceFacts or ContractFacts).
+        evidence: Already-grounded evidence from locate_evidence.
+        findings: Findings from locate_evidence (may include MISSING_EVIDENCE).
+        pages: Parsed document pages to search.
+
+    Returns:
+        tuple: (updated_evidence, updated_findings)
+            - updated_evidence: Original evidence plus any repaired items
+            - updated_findings: Findings with repaired fields removed
+    """
     have = {e.field for e in evidence}
     wanted = {f.field for f in findings if f.field} | set(facts.REQUIRED)
     evidence = list(evidence)
@@ -104,7 +186,19 @@ def ground_by_value(
 
 
 def missing_facts(facts: Facts, evidence: list[FieldEvidence]) -> list[Finding]:
-    """Required facts must be present and supported by a grounded quote."""
+    """Check that all required facts are present and have grounded evidence.
+
+    For each required field (per facts.REQUIRED), verifies:
+    1. The fact value is not None/empty (special case: parties needs >= 2)
+    2. There is grounded evidence supporting the fact
+
+    Args:
+        facts: Extracted facts with REQUIRED class variable.
+        evidence: Grounded evidence items.
+
+    Returns:
+        list[Finding]: MISSING_FACT or MISSING_EVIDENCE findings for each gap.
+    """
     supported = {e.field for e in evidence}
     findings: list[Finding] = []
     for name in facts.REQUIRED:
@@ -124,15 +218,41 @@ def missing_facts(facts: Facts, evidence: list[FieldEvidence]) -> list[Finding]:
 
 
 def _months_between(start: date, end: date) -> int:
-    """Whole months from start to end, inclusive (1 Nov 2026 to 31 Oct 2029 is 36)."""
+    """Calculate whole months between two dates, inclusive.
+
+    Used for contract total value calculation. Counts the number of period
+    starts between effective_date and end_date inclusive.
+
+    Example: 1 Nov 2026 to 31 Oct 2029 = 36 months (3 years * 12)
+
+    Args:
+        start: Start date (inclusive).
+        end: End date (inclusive).
+
+    Returns:
+        int: Number of whole months.
+    """
     return (end.year - start.year) * 12 + end.month - start.month + 1
 
 
 def derive_contract_values(facts: ContractFacts, pages: list[ParsedPage]) -> list[Finding]:
-    """Fill what the model left empty from the document itself, and say how it was derived.
+    """Infer missing contract fields from document text and other facts.
 
-    The currency comes from the one ISO code the text uses. The total value of a recurring
-    contract is the sum of its payments, applying the yearly increase compounded.
+    Derives two fields when missing:
+    1. currency: If not set, scans document text for known ISO currency codes.
+       If exactly one is found, uses it and adds CURRENCY_INFERRED finding.
+    2. total_value: If not set but recurring_amount, recurring_period,
+       effective_date, and end_date are present, calculates the sum of all
+       payments over the term with compounded annual increases.
+
+    Modifies facts in place and returns informational findings.
+
+    Args:
+        facts: ContractFacts to enrich (modified in place).
+        pages: Parsed document pages for currency detection.
+
+    Returns:
+        list[Finding]: Derivation notes (CURRENCY_INFERRED, DERIVED_TOTAL_VALUE).
     """
     notes: list[Finding] = []
     if facts.currency is None:
@@ -174,7 +294,22 @@ def derive_contract_values(facts: ContractFacts, pages: list[ParsedPage]) -> lis
 
 
 def business_violations(facts: Facts) -> list[Finding]:
-    """Rules a readable document can still break. These reject the document."""
+    """Check business rules that can reject a readable document.
+
+    These are hard constraints that make a document unacceptable even if
+    it was read confidently and is the correct type:
+    - Invoice: subtotal + tax must equal total (within TOLERANCE)
+    - Invoice: line items must sum to subtotal (within TOLERANCE)
+    - Contract: end_date must not be before effective_date
+    - Both: currency must be a valid 3-letter ISO code if present
+
+    Args:
+        facts: Extracted facts (InvoiceFacts or ContractFacts).
+
+    Returns:
+        list[Finding]: Violation findings (TOTAL_MISMATCH, LINE_ITEMS_MISMATCH,
+            DATE_ORDER, INVALID_CURRENCY). Empty if no violations.
+    """
     findings: list[Finding] = []
     if isinstance(facts, InvoiceFacts):
         if None not in (facts.subtotal, facts.tax, facts.total):
