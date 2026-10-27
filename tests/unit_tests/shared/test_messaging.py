@@ -101,3 +101,18 @@ def test_backoff_grows_and_is_capped() -> None:
     assert backoff(0) > 0
     assert max(backoff(1) for _ in range(20)) < min(backoff(6) for _ in range(20)) * 3
     assert backoff(30) <= 300.0 * 1.5
+
+
+async def test_every_event_handler_runs_without_raising() -> None:
+    """Regression: logging with an `event=` keyword collided with structlog's own argument,
+    so every AnalysisAccepted and AnalysisFailed handler failed and the event was parked."""
+    from docintel.models.events import AnalysisAccepted, AnalysisFailed
+    from docintel.shared.messaging import build_event_handlers
+    from tests.unit_tests.fakes import Pipeline
+
+    pipeline = Pipeline()
+    handlers = build_event_handlers(lambda: pipeline.uow(), pipeline.start)
+
+    for event in (AnalysisAccepted(uuid4(), 1), AnalysisFailed(uuid4(), "boom")):
+        for handler in handlers[type(event).__name__]:
+            await handler(event)

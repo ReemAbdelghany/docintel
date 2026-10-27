@@ -138,7 +138,7 @@ def build_event_handlers(
 
     async def log_processed(event: DomainEvent) -> None:
         log.info(
-            "analysis_finished", event=type(event).__name__, document_id=str(event.document_id)
+            "analysis_finished", event_type=type(event).__name__, document_id=str(event.document_id)
         )
 
     return {
