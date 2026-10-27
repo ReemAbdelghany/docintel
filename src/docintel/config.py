@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     nvidia_api_key: SecretStr = SecretStr("")
     llm_base_url: str = ""
     llm_api_key: SecretStr = SecretStr("")
+    logfire_token: SecretStr = SecretStr("")  # empty = tracing off
     llm_max_attempts: int = Field(default=8, ge=1)
     min_classification_confidence: float = 0.7
     max_upload_bytes: int = 20 * 1024 * 1024

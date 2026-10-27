@@ -27,6 +27,7 @@ from docintel.utils.common.retry import with_retries
 from docintel.utils.providers.llm_provider import get_classifier, get_extractor
 from docintel.utils.providers.parser_provider import parse_document
 from docintel.utils.providers.storage_provider import get_storage
+from docintel.utils.providers.tracing_provider import document_span
 
 logger = logging.getLogger(__name__)
 log = structlog.get_logger()
@@ -146,9 +147,10 @@ async def process_document(document_id: UUID) -> None:
         except ProcessingError as exc:
             await _save(document_id, Outcome(DocumentStatus.NEEDS_REVIEW, f"parsing failed: {exc}"))
             return
-        outcome = await analyze(
-            pages, llm_classify, llm_extract, get_settings().min_classification_confidence
-        )
+        with document_span(str(document_id), document.filename):
+            outcome = await analyze(
+                pages, llm_classify, llm_extract, get_settings().min_classification_confidence
+            )
         await _save(document_id, outcome)
     except Exception:  # background boundary: never leave a document stuck in processing
         logger.exception("unexpected error while processing %s", document_id)

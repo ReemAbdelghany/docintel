@@ -8,7 +8,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import InterfaceError, OperationalError
 
 from docintel.config import VERSION, get_settings
 from docintel.routers.v1alpha1.components.crud import interrupt_unfinished
@@ -22,14 +22,20 @@ from docintel.utils.providers.pg_database_provider import (
     initialize_engine,
 )
 from docintel.utils.providers.storage_provider import initialize_storage
+from docintel.utils.providers.tracing_provider import initialize_tracing
 
 logger = logging.getLogger(__name__)
+
+# A refused or dropped connection is an outage. Other database errors (a missing table, a bad
+# query) are bugs and must stay visible as 500s.
+CONNECTION_ERRORS = (OSError, OperationalError, InterfaceError)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Initialize every provider once, on startup."""
     configure_logging(get_settings().log_level)
+    initialize_tracing()
     initialize_engine()
     initialize_storage()
     initialize_llm()
@@ -38,7 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         flagged = await interrupt_unfinished()
         if flagged:
             logger.warning("flagged %s interrupted documents for review", flagged)
-    except (OSError, DBAPIError):
+    except CONNECTION_ERRORS:
         logger.warning("database not reachable at startup, continuing")
     yield
     await close_engine()
@@ -54,7 +60,8 @@ app.include_router(v1alpha1_router)
 
 
 @app.exception_handler(OSError)
-@app.exception_handler(DBAPIError)
+@app.exception_handler(OperationalError)
+@app.exception_handler(InterfaceError)
 async def on_dependency_down(request: Request, exc: Exception) -> JSONResponse:
     """A refused or dropped database connection is an outage, not a bug: tell clients to retry."""
     logger.error("dependency unavailable: %s", type(exc).__name__)
@@ -73,7 +80,7 @@ async def readyz(response: Response) -> dict[str, str]:
     try:
         async with get_async_session()() as session:
             await session.execute(text("SELECT 1"))
-    except (OSError, DBAPIError):
+    except CONNECTION_ERRORS:
         response.status_code = 503
         return {"status": "unavailable", "database": "down"}
     return {"status": "ok", "database": "up"}
