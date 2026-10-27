@@ -1,0 +1,36 @@
+meta {
+  name: 05 Invoice status
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{host}}/v1alpha1/documents/{{invoice_id}}
+  body: none
+  auth: none
+}
+
+script:pre-request {
+  // Processing is asynchronous (parse, classify, LLM). Wait until the document settles.
+  const axios = require("axios");
+  const url = bru.interpolate("{{host}}/v1alpha1/documents/{{invoice_id}}");
+  for (let i = 0; i < 90; i++) {
+    const r = await axios.get(url, { validateStatus: () => true });
+    if (r.status === 200 && r.data.status !== "processing") break;
+    await bru.sleep(4000);
+  }
+}
+
+tests {
+  test("decision is accepted", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.status).to.equal("accepted");
+    expect(res.body.document_type).to.equal("invoice");
+    expect(res.body.facts.invoice_number).to.be.a("string");
+    expect(res.body.evidence.length).to.be.above(0);
+  });
+}
+
+docs {
+  Waits until processing settles. Returns the decision, extracted facts and evidence.
+}

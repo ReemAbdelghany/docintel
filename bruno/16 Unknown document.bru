@@ -1,0 +1,18 @@
+meta {
+  name: 16 Unknown document
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{host}}/v1alpha1/documents/00000000-0000-0000-0000-000000000000
+  body: none
+  auth: none
+}
+
+
+tests {
+  test("404 for an unknown id", function () {
+    expect(res.status).to.equal(404);
+  });
+}

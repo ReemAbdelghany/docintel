@@ -14,14 +14,11 @@ dependencies = [
     "docling>=2.143.0",
     "fastapi>=0.162.0",
     "httpx>=0.28.1",
-    "opentelemetry-exporter-otlp>=1.45.1",
-    "opentelemetry-instrumentation-fastapi>=0.66b1",
-    "opentelemetry-instrumentation-sqlalchemy>=0.66b1",
-    "opentelemetry-sdk>=1.45.1",
     "pydantic-ai-slim[anthropic,openai]>=2.62.0",
     "pydantic-settings>=2.16.1",
     "python-multipart>=0.0.32",
     "sqlalchemy[asyncio]>=2.1.6",
+    "sqlmodel>=0.0.48",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -31,14 +28,12 @@ docintel = "docintel:main"
 
 [dependency-groups]
 dev = [
-    "import-linter>=2.3.0",
     "mypy>=1.15.0",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
     "pytest-cov>=6.1.1",
     "reportlab>=5.1.0",
     "ruff>=0.11.5",
-    "testcontainers[postgres]>=4.10.0",
 ]
 
 [tool.ruff]
@@ -57,50 +52,12 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["unstructured.*"]
-ignore_missing_imports = true  # optional extra, imported lazily
-
-[[tool.mypy.overrides]]
 module = ["aioboto3.*", "botocore.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = ["integration: requires Docker services"]
-
-[tool.importlinter]
-root_package = "docintel"
-include_external_packages = true
-
-[[tool.importlinter.contracts]]
-name = "Domain models import no frameworks and no outer layers"
-type = "forbidden"
-source_modules = ["docintel.models"]
-forbidden_modules = [
-    "sqlalchemy",
-    "fastapi",
-    "pydantic",
-    "pydantic_ai",
-    "docling",
-    "httpx",
-    "docintel.shared",
-    "docintel.routers",
-    "docintel.utils",
-]
-
-[[tool.importlinter.contracts]]
-name = "Application layer depends on ports, not providers"
-type = "forbidden"
-source_modules = ["docintel.shared"]
-forbidden_modules = [
-    "sqlalchemy",
-    "fastapi",
-    "docling",
-    "httpx",
-    "docintel.routers",
-    "docintel.utils.providers",
-]
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]

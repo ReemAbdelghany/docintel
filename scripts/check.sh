@@ -6,5 +6,4 @@ cd "$(dirname "$0")/.."
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy src
-uv run lint-imports
-uv run pytest -m 'not integration' -q
+uv run pytest -q

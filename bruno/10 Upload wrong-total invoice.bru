@@ -1,0 +1,30 @@
+meta {
+  name: 10 Upload wrong-total invoice
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{host}}/v1alpha1/cases/{{case_id}}/documents
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  file: @file(../assets/Examples/invoice_wrong_total.pdf)
+}
+
+script:post-response {
+  bru.setVar("wrong_id", res.body.document_id);
+}
+
+tests {
+  test("accepted for processing", function () {
+    expect(res.status).to.equal(202);
+    expect(res.body.status).to.equal("processing");
+  });
+}
+
+docs {
+  Total does not match subtotal plus tax.
+}

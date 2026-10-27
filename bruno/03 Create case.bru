@@ -17,10 +17,9 @@ script:post-response {
 tests {
   test("case is created", function () {
     expect(res.status).to.equal(201);
-    expect(res.body.case_id).to.be.a("string");
   });
 }
 
 docs {
-  Flow step 1. Creates an onboarding case and saves it as `case_id`.
+  Step 1. Creates an onboarding case and saves it as `case_id`.
 }

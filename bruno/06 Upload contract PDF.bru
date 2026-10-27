@@ -1,0 +1,30 @@
+meta {
+  name: 06 Upload contract PDF
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{host}}/v1alpha1/cases/{{case_id}}/documents
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  file: @file(../assets/Examples/contract_services_agreement.pdf)
+}
+
+script:post-response {
+  bru.setVar("contract_id", res.body.document_id);
+}
+
+tests {
+  test("accepted for processing", function () {
+    expect(res.status).to.equal(202);
+    expect(res.body.status).to.equal("processing");
+  });
+}
+
+docs {
+  A contract is classified and its parties, dates and value are extracted.
+}

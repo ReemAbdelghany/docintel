@@ -1,0 +1,30 @@
+meta {
+  name: 12 Upload non-document file
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{host}}/v1alpha1/cases/{{case_id}}/documents
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  file: @file(../assets/Examples/not_a_document.txt)
+}
+
+script:post-response {
+  bru.setVar("bad_id", res.body.document_id);
+}
+
+tests {
+  test("accepted for processing", function () {
+    expect(res.status).to.equal(202);
+    expect(res.body.status).to.equal("processing");
+  });
+}
+
+docs {
+  Not a PDF or an image, so parsing fails.
+}

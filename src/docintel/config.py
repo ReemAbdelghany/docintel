@@ -1,3 +1,6 @@
+"""Settings, read once from the environment and config/.env (anchored to the project root)."""
+
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -6,6 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ENV_FILE = PROJECT_ROOT / "config" / ".env"
+VERSION = "0.1.0"
+BASE_URL_PREFIX = "/v1alpha1"
 
 
 class Settings(BaseSettings):
@@ -16,21 +21,18 @@ class Settings(BaseSettings):
     local_storage_path: Path = PROJECT_ROOT / "storage"
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket: str = "documents"
-    parser_backend: Literal["docling", "unstructured"] = "docling"
-    unstructured_strategy: str = "auto"
-    llm_model: str
-    classifier_model: str
+    llm_model: str = "nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+    classifier_model: str = "nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
     llm_output_mode: Literal["tool", "prompted"] = "prompted"
     nvidia_api_key: SecretStr = SecretStr("")
     llm_base_url: str = ""
     llm_api_key: SecretStr = SecretStr("")
-    llm_fallbacks: list[str] = Field(default_factory=list)
-    llm_concurrency: int = 4
+    llm_max_attempts: int = Field(default=8, ge=1)
     min_classification_confidence: float = 0.7
-    job_max_attempts: int = 8
-    job_visibility_seconds: int = 600
-    outbox_max_attempts: int = 5
-    poll_seconds: float = 0.5
-    embedded_worker: bool = True
-    otlp_endpoint: str = "http://localhost:4317"
+    max_upload_bytes: int = 20 * 1024 * 1024
     log_level: str = "INFO"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
