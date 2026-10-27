@@ -53,6 +53,10 @@ class OnboardingCase:
         )
         return document, True
 
+    def restore(self, document: SubmittedDocument) -> None:
+        """Rebuild state from storage without raising events."""
+        self._documents[document.content_hash] = document
+
     def close(self) -> None:
         self.closed = True
 

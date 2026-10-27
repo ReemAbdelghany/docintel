@@ -27,5 +27,9 @@ class Settings(BaseSettings):
     llm_concurrency: int = 4
     min_classification_confidence: float = 0.7
     job_max_attempts: int = 5
+    job_visibility_seconds: int = 600
+    outbox_max_attempts: int = 5
+    poll_seconds: float = 0.5
+    embedded_worker: bool = True
     otlp_endpoint: str = "http://localhost:4317"
     log_level: str = "INFO"
