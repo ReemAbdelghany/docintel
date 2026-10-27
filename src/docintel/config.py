@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="DOCINTEL_", env_file="config/.env")
+    model_config = SettingsConfigDict(
+        env_prefix="DOCINTEL_", env_file="config/.env", extra="ignore"
+    )
 
     database_url: str = "postgresql+asyncpg://docintel:docintel@localhost:5432/docintel"
     storage_backend: Literal["local", "s3"] = "local"
