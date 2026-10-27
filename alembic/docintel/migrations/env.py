@@ -1,11 +1,15 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
+from dotenv import dotenv_values
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from docintel.config import Settings
+from docintel.utils.providers.db.tables import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -16,11 +20,20 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+# one metadata object for all contexts, so autogenerate sees every table
+target_metadata = Base.metadata
+
+
+def database_url() -> str:
+    """DOCINTEL_DATABASE_URL from the environment, then config/.env, then the settings default."""
+    return (
+        os.environ.get("DOCINTEL_DATABASE_URL")
+        or dotenv_values("config/.env").get("DOCINTEL_DATABASE_URL")
+        or Settings.model_fields["database_url"].default
+    )
+
+
+config.set_main_option("sqlalchemy.url", database_url())
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
