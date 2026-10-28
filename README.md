@@ -21,6 +21,8 @@ Upload a PDF or an image of a contract or an invoice and get structured, verifie
 | Config | Pydantic Settings | Type-safe, env-prefix, `.env`, `SecretStr` for secrets |
 | Package Manager | uv | 10-100x faster than pip, lockfile, workspace support |
 | Testing | pytest + pytest-asyncio | Async-native, fixtures, parametrize |
+| Migrations | Alembic | Versioned, autogenerate from SQLModel, never hand-edit |
+| API Client | Bruno | Git-friendly plain-text collection, runnable in CI |
 
 ---
 
